@@ -1,0 +1,29 @@
+{
+  "name": "synapse-pro",
+  "version": "1.0.0",
+  "description": "Discord bot with moderation, economy, and utility features",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "deploy": "node deploy-commands.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.13.0",
+    "@octokit/rest": "^20.0.1",
+    "dotenv": "^16.3.1",
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=16.9.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ayomide650/Synapse-pro.git"
+  },
+  "author": "Ayomide650",
+  "license": "MIT"
+}
