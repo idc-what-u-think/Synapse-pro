@@ -20,13 +20,13 @@ const FILE_PATHS = {
 async function initializeRepo(octokit, owner, repo) {
     try {
         // Check if repo exists
-        const response = await octokit.repos.get({ owner, repo });
+        const response = await octokit.rest.repos.get({ owner, repo }); // Fixed: Added .rest
         console.log(`Repository ${owner}/${repo} exists`);
         return response;
     } catch (error) {
         if (error.status === 404) {
             // Create repo if it doesn't exist
-            const newRepo = await octokit.repos.createForAuthenticatedUser({
+            const newRepo = await octokit.rest.repos.createForAuthenticatedUser({ // Fixed: Added .rest
                 name: repo,
                 auto_init: true,
                 private: true,
@@ -42,7 +42,7 @@ async function initializeRepo(octokit, owner, repo) {
 
 async function ensureDirectory(dirPath) {
     try {
-        await octokit.repos.getContent({
+        await octokit.rest.repos.getContent({ // Fixed: Added .rest
             owner,
             repo,
             path: dirPath
@@ -51,7 +51,7 @@ async function ensureDirectory(dirPath) {
         if (error.status === 404) {
             // Directory doesn't exist, create it with a .gitkeep file
             try {
-                await octokit.repos.createOrUpdateFileContents({
+                await octokit.rest.repos.createOrUpdateFileContents({ // Fixed: Added .rest
                     owner,
                     repo,
                     path: `${dirPath}/.gitkeep`,
@@ -70,13 +70,19 @@ async function ensureDirectory(dirPath) {
 
 async function getData(pathOrKey) {
     try {
+        // Validate input
+        if (!pathOrKey) {
+            console.error('getData called with undefined/null path');
+            throw new Error('Path parameter is required');
+        }
+        
         await initializeRepo(octokit, owner, repo);
         
         // Check if it's a predefined key or a custom path
         const path = FILE_PATHS[pathOrKey] || pathOrKey;
         
         console.log(`Getting data from: ${path}`);
-        const response = await octokit.repos.getContent({
+        const response = await octokit.rest.repos.getContent({
             owner,
             repo,
             path,
@@ -117,7 +123,7 @@ async function saveData(pathOrKey, content, message = 'Update data') {
         
         let sha;
         try {
-            const existing = await octokit.repos.getContent({
+            const existing = await octokit.rest.repos.getContent({ // Fixed: Added .rest
                 owner,
                 repo,
                 path,
@@ -142,7 +148,7 @@ async function saveData(pathOrKey, content, message = 'Update data') {
         
         if (sha) params.sha = sha;
 
-        const result = await octokit.repos.createOrUpdateFileContents(params);
+        const result = await octokit.rest.repos.createOrUpdateFileContents(params); // Fixed: Added .rest
         console.log(`Successfully saved data to: ${path}`);
         return result;
     } catch (error) {
@@ -229,18 +235,18 @@ async function testPermissions() {
     try {
         console.log(`Testing access to ${owner}/${repo}...`);
         
-        // Verify token authentication
-        const { data: tokenData } = await octokit.users.getAuthenticated();
+        // Verify token authentication - Fixed: Added .rest
+        const { data: tokenData } = await octokit.rest.users.getAuthenticated();
         console.log('Authenticated as:', tokenData.login);
 
-        // Verify repository access
-        const { data: repoData } = await octokit.repos.get({ owner, repo });
+        // Verify repository access - Fixed: Added .rest
+        const { data: repoData } = await octokit.rest.repos.get({ owner, repo });
         console.log('Repository access verified:', repoData.full_name);
 
         // Test write access by creating a temporary file
         const testFilePath = '.github/test-write-access';
         try {
-            await octokit.repos.createOrUpdateFileContents({
+            await octokit.rest.repos.createOrUpdateFileContents({ // Fixed: Added .rest
                 owner,
                 repo,
                 path: testFilePath,
@@ -250,12 +256,12 @@ async function testPermissions() {
             console.log('✓ Write permission verified');
             
             // Clean up test file
-            const { data: fileData } = await octokit.repos.getContent({
+            const { data: fileData } = await octokit.rest.repos.getContent({ // Fixed: Added .rest
                 owner,
                 repo,
                 path: testFilePath,
             });
-            await octokit.repos.deleteFile({
+            await octokit.rest.repos.deleteFile({ // Fixed: Added .rest
                 owner,
                 repo,
                 path: testFilePath,
@@ -267,6 +273,19 @@ async function testPermissions() {
         } catch (writeError) {
             console.error('Write permission test failed:', writeError.message);
             console.error('Ensure your token has the "repo" scope for private repositories.');
+            
+            // Additional error analysis for fine-grained tokens
+            if (writeError.message.includes('Resource not accessible by integration')) {
+                console.error('\n🔍 SPECIFIC ISSUE DETECTED:');
+                console.error('You are using a fine-grained personal access token.');
+                console.error('Fine-grained tokens need specific repository permissions.');
+                console.error('\nRECOMMENDED FIX:');
+                console.error('1. Go to https://github.com/settings/tokens');
+                console.error('2. Click "Generate new token (classic)"');
+                console.error('3. Select "repo" scope');
+                console.error('4. Replace your current token with the classic one');
+            }
+            
             return false;
         }
     } catch (error) {

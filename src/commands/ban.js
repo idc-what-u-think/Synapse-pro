@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
-const { getData, saveData } = require('../utils/github');
+const { getBans, saveBans } = require('../utils/github');
 const { sendModlogEmbed } = require('../utils/modlog');
 
 module.exports = {
@@ -20,47 +20,131 @@ module.exports = {
                 .setMaxValue(7))
         .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers),
 
-    async execute(interaction, octokit, owner, repo) {
-        const user = interaction.options.getUser('user');
-        const reason = interaction.options.getString('reason') || 'No reason provided';
-        const deleteDays = interaction.options.getInteger('delete_days') || 0;
+    async execute(interaction) {
+        try {
+            const user = interaction.options.getUser('user');
+            const reason = interaction.options.getString('reason') || 'No reason provided';
+            const deleteDays = interaction.options.getInteger('delete_days') || 0;
 
-        const modData = await getData(octokit, owner, repo, 'moderation.json');
-        if (!modData.bans) modData.bans = [];
-        
-        modData.bans.push({
-            userId: user.id,
-            moderatorId: interaction.user.id,
-            reason,
-            deleteDays,
-            timestamp: new Date().toISOString(),
-            guildId: interaction.guildId
-        });
+            // Check if user can be banned
+            if (user.id === interaction.user.id) {
+                return await interaction.reply({
+                    content: 'You cannot ban yourself!',
+                    ephemeral: true
+                });
+            }
 
-        await saveData(octokit, owner, repo, 'moderation.json', modData,
-            `Ban: ${user.tag} by ${interaction.user.tag}`);
+            if (user.id === interaction.client.user.id) {
+                return await interaction.reply({
+                    content: 'I cannot ban myself!',
+                    ephemeral: true
+                });
+            }
 
-        await interaction.guild.members.ban(user, { 
-            deleteMessageDays: deleteDays,
-            reason: reason 
-        });
-        
-        const modlogEmbed = new EmbedBuilder()
-            .setColor(0xFF0000)
-            .setTitle('Member Banned')
-            .addFields(
-                { name: 'User', value: `${user.tag} (${user.id})` },
-                { name: 'Moderator', value: `${interaction.user.tag}` },
-                { name: 'Delete Messages', value: `${deleteDays} days` },
-                { name: 'Reason', value: reason }
-            )
-            .setTimestamp();
+            // Check if user is already banned
+            const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+            if (!member) {
+                // User might already be banned or not in server
+                const bans = await interaction.guild.bans.fetch();
+                if (bans.has(user.id)) {
+                    return await interaction.reply({
+                        content: 'This user is already banned!',
+                        ephemeral: true
+                    });
+                }
+            }
 
-        await sendModlogEmbed(interaction, octokit, owner, repo, modlogEmbed);
-        
-        await interaction.reply({
-            content: `Banned ${user.tag} | Reason: ${reason} | Message deletion: ${deleteDays} days`,
-            ephemeral: true
-        });
+            // Check role hierarchy if user is still in server
+            if (member) {
+                const botMember = await interaction.guild.members.fetch(interaction.client.user.id);
+                if (member.roles.highest.position >= botMember.roles.highest.position) {
+                    return await interaction.reply({
+                        content: 'I cannot ban this user due to role hierarchy!',
+                        ephemeral: true
+                    });
+                }
+
+                if (member.roles.highest.position >= interaction.member.roles.highest.position) {
+                    return await interaction.reply({
+                        content: 'You cannot ban this user due to role hierarchy!',
+                        ephemeral: true
+                    });
+                }
+            }
+
+            // Get current bans data
+            const bansData = await getBans();
+            
+            // Initialize bans array if it doesn't exist
+            if (!Array.isArray(bansData.bans)) {
+                bansData.bans = [];
+            }
+
+            // Add ban record
+            const banRecord = {
+                userId: user.id,
+                userTag: user.tag,
+                moderatorId: interaction.user.id,
+                moderatorTag: interaction.user.tag,
+                reason,
+                deleteDays,
+                timestamp: new Date().toISOString(),
+                guildId: interaction.guildId
+            };
+
+            bansData.bans.push(banRecord);
+
+            // Save ban data to GitHub
+            await saveBans(bansData, `Ban: ${user.tag} by ${interaction.user.tag}`);
+
+            // Execute the ban
+            await interaction.guild.members.ban(user, { 
+                deleteMessageDays: deleteDays,
+                reason: `${reason} | Moderator: ${interaction.user.tag}`
+            });
+            
+            // Create modlog embed
+            const modlogEmbed = new EmbedBuilder()
+                .setColor(0xFF0000)
+                .setTitle('Member Banned')
+                .addFields(
+                    { name: 'User', value: `${user.tag} (${user.id})`, inline: true },
+                    { name: 'Moderator', value: `${interaction.user.tag}`, inline: true },
+                    { name: 'Delete Messages', value: `${deleteDays} days`, inline: true },
+                    { name: 'Reason', value: reason }
+                )
+                .setThumbnail(user.displayAvatarURL({ dynamic: true }))
+                .setTimestamp();
+
+            // Send to modlog
+            await sendModlogEmbed(interaction, modlogEmbed);
+            
+            // Reply to interaction
+            await interaction.reply({
+                content: `✅ Successfully banned ${user.tag}\n**Reason:** ${reason}\n**Message deletion:** ${deleteDays} days`,
+                ephemeral: true
+            });
+
+        } catch (error) {
+            console.error('Error in ban command:', error);
+            
+            // Handle specific Discord API errors
+            if (error.code === 50013) {
+                await interaction.reply({
+                    content: 'I don\'t have permission to ban this user!',
+                    ephemeral: true
+                });
+            } else if (error.code === 10007) {
+                await interaction.reply({
+                    content: 'User not found!',
+                    ephemeral: true
+                });
+            } else {
+                await interaction.reply({
+                    content: 'An error occurred while trying to ban the user. Please try again.',
+                    ephemeral: true
+                });
+            }
+        }
     },
 };

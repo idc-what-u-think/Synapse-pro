@@ -1,33 +1,68 @@
-const { getData, saveData } = require('./github');
+const { getBalances, saveBalances, getConfig } = require('./github');
 
-async function getBalance(userId, guildId, data) {
-    return data?.guilds?.[guildId]?.economy?.[userId]?.balance || 0;
+async function getUserBalance(userId) {
+    try {
+        const balances = await getBalances();
+        return balances[userId] || 0;
+    } catch (error) {
+        console.error('Error getting user balance:', error);
+        return 0;
+    }
 }
 
-async function addBalance(userId, guildId, amount, reason, octokit, owner, repo) {
-    const data = await getData(octokit, owner, repo, 'economy.json');
-    if (!data.guilds) data.guilds = {};
-    if (!data.guilds[guildId]) data.guilds[guildId] = {};
-    if (!data.guilds[guildId].economy) data.guilds[guildId].economy = {};
-    if (!data.guilds[guildId].economy[userId]) {
-        data.guilds[guildId].economy[userId] = {
-            balance: 0,
-            totalEarned: 0,
-            totalSpent: 0,
-            lastDaily: null,
-            dailyStreak: 0
+async function setUserBalance(userId, amount, reason = 'Balance update') {
+    try {
+        const balances = await getBalances();
+        balances[userId] = Math.max(0, amount); // Prevent negative balances
+        await saveBalances(balances, reason);
+        return balances[userId];
+    } catch (error) {
+        console.error('Error setting user balance:', error);
+        throw error;
+    }
+}
+
+async function addUserBalance(userId, amount, reason = 'Balance change') {
+    try {
+        const currentBalance = await getUserBalance(userId);
+        const newBalance = Math.max(0, currentBalance + amount); // Prevent negative balances
+        return await setUserBalance(userId, newBalance, reason);
+    } catch (error) {
+        console.error('Error adding to user balance:', error);
+        throw error;
+    }
+}
+
+async function getEconomySettings(guildId) {
+    try {
+        const config = await getConfig();
+        const guildSettings = config?.guilds?.[guildId]?.settings || {};
+        
+        return {
+            currency: guildSettings.currency || '💰',
+            gambling: {
+                minBet: guildSettings.gambling?.minBet || 10,
+                maxBet: guildSettings.gambling?.maxBet || 10000,
+                enabled: guildSettings.gambling?.enabled !== false
+            },
+            daily: {
+                amount: guildSettings.daily?.amount || 100,
+                enabled: guildSettings.daily?.enabled !== false
+            }
+        };
+    } catch (error) {
+        console.error('Error getting economy settings:', error);
+        return {
+            currency: '💰',
+            gambling: { minBet: 10, maxBet: 10000, enabled: true },
+            daily: { amount: 100, enabled: true }
         };
     }
-
-    const user = data.guilds[guildId].economy[userId];
-    user.balance += amount;
-    if (amount > 0) user.totalEarned += amount;
-    if (amount < 0) user.totalSpent += Math.abs(amount);
-
-    await saveData(octokit, owner, repo, 'economy.json', data,
-        `${reason}: ${amount} for user ${userId}`);
-        
-    return user;
 }
 
-module.exports = { getBalance, addBalance };
+module.exports = {
+    getUserBalance,
+    setUserBalance,
+    addUserBalance,
+    getEconomySettings
+};

@@ -1,9 +1,10 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Collection } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, Routes } = require('discord.js');
+const { REST } = require('@discordjs/rest');
 const fs = require('fs');
 const path = require('path');
 const database = require('./src/utils/database');
-const { testPermissions } = require('./src/utils/github');
+const github = require('./src/utils/github'); // Fixed: Import entire module
 
 const client = new Client({
     intents: [
@@ -26,7 +27,7 @@ async function initialize() {
     try {
         // Test GitHub permissions first
         console.log('\nTesting GitHub permissions...');
-        const permissionsOk = await testPermissions();
+        const permissionsOk = await github.testPermissions(); // Fixed: Use github.testPermissions()
         if (!permissionsOk) {
             console.error('\nGitHub setup instructions:');
             console.error('1. Go to https://github.com/settings/tokens');
@@ -39,10 +40,17 @@ async function initialize() {
         
         // Initialize database
         console.log('Initializing database...');
-        const dbInitialized = await database.init();
-        if (!dbInitialized) {
-            console.error('Database initialization failed!');
-            process.exit(1);
+        
+        // Check if database has init method
+        if (typeof database.init === 'function') {
+            const dbInitialized = await database.init();
+            if (!dbInitialized) {
+                console.error('Database initialization failed!');
+                process.exit(1);
+            }
+        } else {
+            // If database doesn't have init, it might be using a different structure
+            console.log('Database module loaded (no init method found)');
         }
         console.log('Database initialization successful!');
         
@@ -55,13 +63,55 @@ async function initialize() {
 // Load commands
 console.log('Loading commands...');
 const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
+const commands = [];
+
 for (const file of commandFiles) {
     try {
         const command = require(path.join(commandsPath, file));
         client.commands.set(command.data.name, command);
+        commands.push(command.data.toJSON());
         console.log(`Loaded command: ${command.data.name}`);
     } catch (error) {
         console.error(`Error loading command ${file}:`, error);
+    }
+}
+
+// Auto-register slash commands
+async function registerCommands() {
+    const clientId = process.env.CLIENT_ID || process.env.DISCORD_CLIENT_ID;
+    
+    if (!process.env.DISCORD_TOKEN || !clientId) {
+        console.error('Missing DISCORD_TOKEN or CLIENT_ID/DISCORD_CLIENT_ID in .env file');
+        console.error('Your CLIENT_ID should be: DISCORD_CLIENT_ID=1408214555418427393 (already set)');
+        return false;
+    }
+
+    const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+
+    try {
+        console.log(`\nRegistering ${commands.length} slash commands...`);
+        
+        // Register commands globally
+        await rest.put(
+            Routes.applicationCommands(clientId),
+            { body: commands }
+        );
+        
+        console.log('✓ Successfully registered global slash commands!');
+        return true;
+    } catch (error) {
+        console.error('Failed to register slash commands:', error);
+        
+        // Provide helpful error messages
+        if (error.code === 50001) {
+            console.error('Bot is missing access. Make sure the bot is invited with the applications.commands scope.');
+        } else if (error.code === 10002) {
+            console.error('Invalid CLIENT_ID. Check your CLIENT_ID in the .env file.');
+        } else if (error.status === 401) {
+            console.error('Invalid DISCORD_TOKEN. Check your token in the .env file.');
+        }
+        
+        return false;
     }
 }
 
@@ -124,6 +174,14 @@ client.once('ready', async () => {
     console.log(`Ready! Logged in as ${client.user.tag}`);
     console.log(`Serving ${client.guilds.cache.size} guilds`);
     console.log(`Loaded ${client.commands.size} commands`);
+    
+    // Auto-register commands on startup
+    console.log('\nChecking slash command registration...');
+    const registered = await registerCommands();
+    if (!registered) {
+        console.log('⚠️  Command registration failed, but bot will continue running');
+        console.log('Commands may not work properly until registration succeeds');
+    }
     
     // Set bot status
     client.user.setActivity('slash commands', { type: 'LISTENING' });

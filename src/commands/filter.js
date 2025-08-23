@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
-const { getData, saveData } = require('../utils/github');
+const { getConfig, saveConfig } = require('../utils/github');
 
 function convertToRegexPattern(word) {
     return word.replace(/\*/g, '.*').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -44,122 +44,150 @@ module.exports = {
                         .setDescription('Role that can bypass the filter')))
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
-    async execute(interaction, octokit, owner, repo) {
-        const subcommand = interaction.options.getSubcommand();
-        const config = await getData(octokit, owner, repo, 'config.json');
-        
-        if (!config.guilds) config.guilds = {};
-        if (!config.guilds[interaction.guild.id]) config.guilds[interaction.guild.id] = {};
-        if (!config.guilds[interaction.guild.id].filter) config.guilds[interaction.guild.id].filter = {
-            words: {},
-            bypassRoles: []
-        };
+    async execute(interaction) {
+        try {
+            // Defer reply to prevent timeout
+            await interaction.deferReply({ ephemeral: true });
 
-        const filter = config.guilds[interaction.guild.id].filter;
+            // Check if command is used in a guild
+            if (!interaction.guild) {
+                return await interaction.editReply({
+                    content: '❌ This command can only be used in a server, not in DMs.'
+                });
+            }
 
-        switch (subcommand) {
-            case 'add': {
-                const word = interaction.options.getString('word').toLowerCase();
-                const action = interaction.options.getString('action');
-                
-                filter.words[word] = {
-                    pattern: convertToRegexPattern(word),
-                    action,
-                    addedBy: interaction.user.id,
-                    addedAt: new Date().toISOString()
+            const subcommand = interaction.options.getSubcommand();
+            const config = await getConfig();
+            
+            // Initialize guild config structure
+            if (!config.guilds) config.guilds = {};
+            if (!config.guilds[interaction.guild.id]) config.guilds[interaction.guild.id] = {};
+            if (!config.guilds[interaction.guild.id].filter) {
+                config.guilds[interaction.guild.id].filter = {
+                    words: {},
+                    bypassRoles: []
                 };
-
-                await saveData(octokit, owner, repo, 'config.json', config,
-                    `Added filter word: ${word}`);
-                
-                await interaction.reply({
-                    content: `Added "${word}" to filter with action: ${action}`,
-                    ephemeral: true
-                });
-                break;
             }
-            case 'remove': {
-                const word = interaction.options.getString('word').toLowerCase();
-                
-                if (filter.words[word]) {
-                    delete filter.words[word];
-                    await saveData(octokit, owner, repo, 'config.json', config,
-                        `Removed filter word: ${word}`);
+
+            const filter = config.guilds[interaction.guild.id].filter;
+
+            switch (subcommand) {
+                case 'add': {
+                    const word = interaction.options.getString('word').toLowerCase();
+                    const action = interaction.options.getString('action');
                     
-                    await interaction.reply({
-                        content: `Removed "${word}" from filter`,
-                        ephemeral: true
-                    });
-                } else {
-                    await interaction.reply({
-                        content: `Word "${word}" not found in filter`,
-                        ephemeral: true
-                    });
-                }
-                break;
-            }
-            case 'list': {
-                const words = Object.entries(filter.words);
-                if (words.length === 0) {
-                    await interaction.reply({
-                        content: 'No filtered words configured.',
-                        ephemeral: true
-                    });
-                    return;
-                }
+                    filter.words[word] = {
+                        pattern: convertToRegexPattern(word),
+                        action,
+                        addedBy: interaction.user.id,
+                        addedAt: new Date().toISOString()
+                    };
 
-                const embed = new EmbedBuilder()
-                    .setColor(0x0099FF)
-                    .setTitle('Filtered Words')
-                    .setDescription(words.map(([word, config]) =>
-                        `• \`${word}\` - Action: ${config.action}`
-                    ).join('\n'))
-                    .addFields({
-                        name: 'Bypass Roles',
-                        value: filter.bypassRoles.length ?
-                            filter.bypassRoles.map(id => `<@&${id}>`).join(', ') :
-                            'None configured'
-                    })
-                    .setTimestamp();
-
-                await interaction.reply({
-                    embeds: [embed],
-                    ephemeral: true
-                });
-                break;
-            }
-            case 'bypass': {
-                const role = interaction.options.getRole('role');
+                    await saveConfig(config, `Added filter word: ${word} (${action}) by ${interaction.user.tag}`);
+                    
+                    await interaction.editReply({
+                        content: `✅ Added \`${word}\` to filter with action: **${action}**`
+                    });
+                    break;
+                }
                 
-                if (role) {
-                    if (!filter.bypassRoles.includes(role.id)) {
-                        filter.bypassRoles.push(role.id);
-                        await saveData(octokit, owner, repo, 'config.json', config,
-                            `Added filter bypass role: ${role.name}`);
+                case 'remove': {
+                    const word = interaction.options.getString('word').toLowerCase();
+                    
+                    if (filter.words[word]) {
+                        delete filter.words[word];
+                        await saveConfig(config, `Removed filter word: ${word} by ${interaction.user.tag}`);
                         
-                        await interaction.reply({
-                            content: `Added ${role} as filter bypass role`,
-                            ephemeral: true
+                        await interaction.editReply({
+                            content: `✅ Removed \`${word}\` from filter`
                         });
                     } else {
-                        filter.bypassRoles = filter.bypassRoles.filter(id => id !== role.id);
-                        await saveData(octokit, owner, repo, 'config.json', config,
-                            `Removed filter bypass role: ${role.name}`);
-                        
-                        await interaction.reply({
-                            content: `Removed ${role} from filter bypass roles`,
-                            ephemeral: true
+                        await interaction.editReply({
+                            content: `❌ Word \`${word}\` not found in filter`
                         });
                     }
-                } else {
-                    await interaction.reply({
-                        content: `Current bypass roles: ${filter.bypassRoles.length ?
-                            filter.bypassRoles.map(id => `<@&${id}>`).join(', ') :
-                            'None'}`,
-                        ephemeral: true
-                    });
+                    break;
                 }
-                break;
+                
+                case 'list': {
+                    const words = Object.entries(filter.words);
+                    if (words.length === 0) {
+                        await interaction.editReply({
+                            content: '📝 No filtered words configured.'
+                        });
+                        return;
+                    }
+
+                    const embed = new EmbedBuilder()
+                        .setColor(0x0099FF)
+                        .setTitle('🔍 Filtered Words')
+                        .setDescription(words.map(([word, config]) =>
+                            `• \`${word}\` - **${config.action}** action`
+                        ).join('\n'))
+                        .addFields({
+                            name: '🛡️ Bypass Roles',
+                            value: filter.bypassRoles.length ?
+                                filter.bypassRoles.map(id => `<@&${id}>`).join(', ') :
+                                'None configured',
+                            inline: false
+                        })
+                        .setFooter({ 
+                            text: `${words.length} filtered word(s) • Requested by ${interaction.user.tag}`,
+                            iconURL: interaction.user.displayAvatarURL()
+                        })
+                        .setTimestamp();
+
+                    await interaction.editReply({
+                        embeds: [embed]
+                    });
+                    break;
+                }
+                
+                case 'bypass': {
+                    const role = interaction.options.getRole('role');
+                    
+                    if (role) {
+                        if (!filter.bypassRoles.includes(role.id)) {
+                            filter.bypassRoles.push(role.id);
+                            await saveConfig(config, `Added filter bypass role: ${role.name} by ${interaction.user.tag}`);
+                            
+                            await interaction.editReply({
+                                content: `✅ Added ${role} as filter bypass role`
+                            });
+                        } else {
+                            filter.bypassRoles = filter.bypassRoles.filter(id => id !== role.id);
+                            await saveConfig(config, `Removed filter bypass role: ${role.name} by ${interaction.user.tag}`);
+                            
+                            await interaction.editReply({
+                                content: `✅ Removed ${role} from filter bypass roles`
+                            });
+                        }
+                    } else {
+                        await interaction.editReply({
+                            content: `🛡️ Current bypass roles: ${filter.bypassRoles.length ?
+                                filter.bypassRoles.map(id => `<@&${id}>`).join(', ') :
+                                'None configured'}`
+                        });
+                    }
+                    break;
+                }
+            }
+            
+        } catch (error) {
+            console.error('Filter command error:', error);
+            
+            try {
+                const errorMessage = {
+                    content: '❌ An error occurred while managing the word filter.'
+                };
+                
+                if (interaction.deferred) {
+                    await interaction.editReply(errorMessage);
+                } else {
+                    await interaction.reply({ ...errorMessage, ephemeral: true });
+                }
+            } catch (replyError) {
+                console.error('Error sending error response:', replyError);
             }
         }
     },

@@ -6,7 +6,7 @@ module.exports = {
         .setName('ping')
         .setDescription('Check bot latency and performance'),
 
-    async execute(interaction, octokit, owner, repo) {
+    async execute(interaction) { // Fixed: Removed extra parameters since we use the github module directly
         const sent = await interaction.reply({ 
             content: 'Pinging...', 
             fetchReply: true 
@@ -14,7 +14,13 @@ module.exports = {
 
         // Test JSON read/write
         const startJson = Date.now();
-        await getData(octokit, owner, repo, 'ping.json');
+        try {
+            // Fixed: Just pass the filename/path, the getData function handles the rest
+            await getData('ping-test.json');
+        } catch (error) {
+            // If file doesn't exist, that's fine for a ping test
+            console.log('Ping test file access completed (file may not exist yet)');
+        }
         const jsonPing = Date.now() - startJson;
 
         const wsHeartbeat = interaction.client.ws.ping;

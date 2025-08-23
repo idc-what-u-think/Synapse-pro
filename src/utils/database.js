@@ -1,296 +1,313 @@
 const { Octokit } = require('@octokit/rest');
 
-class Database {
+class GitHubDebugger {
     constructor() {
         this.octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
         this.owner = process.env.GITHUB_OWNER;
         this.repo = process.env.GITHUB_REPO;
-        this.cache = new Map();
-
-        // Define initial structure
-        this.initialFiles = {
-            'data/config.json': { guilds: {} },
-            'data/moderation/warnings.json': {},
-            'data/moderation/bans.json': {},
-            'data/moderation/mutes.json': {},
-            'data/economy/balances.json': {},
-            'data/economy/daily.json': {},
-            'data/leveling/levels.json': { guilds: {} },
-            'data/features/timers.json': { timers: [], reminders: [] }
-        };
     }
 
-    async checkPermissions() {
+    async comprehensiveDebug() {
+        console.log('🔍 Starting comprehensive GitHub debugging...\n');
+        
         try {
-            console.log('Checking GitHub permissions...');
+            // 1. Check token type and basic info
+            await this.checkTokenInfo();
+            
+            // 2. Check repository access
+            await this.checkRepositoryAccess();
+            
+            // 3. Check specific permissions
+            await this.checkDetailedPermissions();
+            
+            // 4. Test different write operations
+            await this.testWriteOperations();
+            
+            // 5. Check repository settings
+            await this.checkRepositorySettings();
+            
+        } catch (error) {
+            console.error('❌ Debug process failed:', error.message);
+        }
+    }
+
+    async checkTokenInfo() {
+        console.log('📊 TOKEN INFORMATION:');
+        console.log('=' .repeat(50));
+        
+        try {
+            const { data: user } = await this.octokit.rest.users.getAuthenticated();
+            console.log(`✅ Authenticated as: ${user.login}`);
+            console.log(`   Account type: ${user.type}`);
+            console.log(`   Account ID: ${user.id}`);
+            
+            // Check if it's a fine-grained token by looking at headers
+            const response = await this.octokit.request('GET /user');
+            const tokenType = response.headers['x-github-api-version-selected'] || 'classic';
+            console.log(`   Token type: ${tokenType}`);
+            
+        } catch (error) {
+            console.error('❌ Failed to get user info:', error.message);
+            if (error.status === 401) {
+                console.error('   This suggests the token is invalid or expired');
+            }
+        }
+        console.log('');
+    }
+
+    async checkRepositoryAccess() {
+        console.log('🏢 REPOSITORY ACCESS:');
+        console.log('=' .repeat(50));
+        
+        try {
             const { data: repo } = await this.octokit.rest.repos.get({
                 owner: this.owner,
                 repo: this.repo
             });
             
-            console.log(`Repository: ${repo.full_name}`);
-            console.log(`Permissions: push=${repo.permissions?.push}, admin=${repo.permissions?.admin}`);
+            console.log(`✅ Repository: ${repo.full_name}`);
+            console.log(`   Private: ${repo.private}`);
+            console.log(`   Owner type: ${repo.owner.type}`);
+            console.log(`   Your permissions:`);
+            console.log(`     admin: ${repo.permissions?.admin}`);
+            console.log(`     maintain: ${repo.permissions?.maintain}`);
+            console.log(`     push: ${repo.permissions?.push}`);
+            console.log(`     triage: ${repo.permissions?.triage}`);
+            console.log(`     pull: ${repo.permissions?.pull}`);
             
-            if (!repo.permissions?.push) {
-                throw new Error('Token does not have write permissions to the repository');
-            }
+            // Check if you're the owner
+            const { data: user } = await this.octokit.rest.users.getAuthenticated();
+            console.log(`   Are you the owner: ${repo.owner.login === user.login}`);
             
-            return true;
         } catch (error) {
-            console.error('Permission check failed:', error.message);
-            if (error.status === 401) {
-                console.error('Authentication failed. Check your GITHUB_TOKEN.');
-            } else if (error.status === 404) {
-                console.error('Repository not found. Check GITHUB_OWNER and GITHUB_REPO.');
+            console.error('❌ Failed to get repository info:', error.message);
+            if (error.status === 404) {
+                console.error('   Repository not found or no access');
             }
-            return false;
         }
+        console.log('');
     }
 
-    async read(path) {
+    async checkDetailedPermissions() {
+        console.log('🔐 DETAILED PERMISSIONS:');
+        console.log('=' .repeat(50));
+        
         try {
-            // Check cache first
-            if (this.cache.has(path)) {
-                console.log(`Reading from cache: ${path}`);
-                return this.cache.get(path);
-            }
-
-            console.log(`Reading from GitHub: ${path}`);
-            const response = await this.octokit.rest.repos.getContent({
+            // Try to list repository contents
+            const { data: contents } = await this.octokit.rest.repos.getContent({
                 owner: this.owner,
                 repo: this.repo,
-                path
+                path: ''
             });
-
-            // Handle if response is an array (directory) or single file
-            if (Array.isArray(response.data)) {
-                throw new Error(`Path ${path} is a directory, not a file`);
-            }
-
-            const content = JSON.parse(Buffer.from(response.data.content, 'base64').toString());
-            this.cache.set(path, content);
-            console.log(`Successfully read: ${path}`);
-            return content;
-        } catch (error) {
-            if (error.status === 404) {
-                console.log(`File not found: ${path} - returning null for creation`);
-                return null;
-            }
-            console.error(`Error reading ${path}:`, error.message);
-            throw error;
-        }
-    }
-
-    async write(path, data) {
-        try {
-            let sha;
+            console.log(`✅ Can read repository contents (${contents.length} items)`);
+            
+            // Try to get a commit (tests read access)
             try {
-                const existing = await this.octokit.repos.getContent({
+                const { data: commits } = await this.octokit.rest.repos.listCommits({
                     owner: this.owner,
                     repo: this.repo,
-                    path
+                    per_page: 1
                 });
-                sha = existing.data.sha;
-                console.log(`Updating existing file: ${path}`);
-            } catch (error) {
-                if (error.status !== 404) throw error;
-                console.log(`Creating new file: ${path}`);
+                console.log(`✅ Can read commits (latest: ${commits[0]?.sha?.substring(0, 7)})`);
+            } catch (e) {
+                console.error(`❌ Cannot read commits: ${e.message}`);
             }
+            
+        } catch (error) {
+            console.error('❌ Failed to check detailed permissions:', error.message);
+        }
+        console.log('');
+    }
 
-            const response = await this.octokit.repos.createOrUpdateFileContents({
+    async testWriteOperations() {
+        console.log('✍️  WRITE OPERATION TESTS:');
+        console.log('=' .repeat(50));
+        
+        // Test 1: Try to create a simple file
+        await this.testCreateFile();
+        
+        // Test 2: Try to create in a subdirectory
+        await this.testCreateFileInDirectory();
+        
+        // Test 3: Try different API approaches
+        await this.testAlternativeWriteMethods();
+        
+        console.log('');
+    }
+
+    async testCreateFile() {
+        console.log('📝 Test 1: Create simple file');
+        try {
+            const testContent = {
+                test: true,
+                timestamp: new Date().toISOString(),
+                message: 'Debug test file'
+            };
+
+            const response = await this.octokit.rest.repos.createOrUpdateFileContents({
                 owner: this.owner,
                 repo: this.repo,
-                path,
-                message: `${sha ? 'Update' : 'Create'} ${path}`,
-                content: Buffer.from(JSON.stringify(data, null, 2)).toString('base64'),
-                ...(sha && { sha })
+                path: 'debug-test.json',
+                message: 'Debug test file creation',
+                content: Buffer.from(JSON.stringify(testContent, null, 2)).toString('base64')
             });
 
-            console.log(`File ${path} successfully written. Commit SHA: ${response.data.commit.sha}`);
-            this.cache.set(path, data);
-            return true;
-        } catch (error) {
-            console.error('Write error:', error.message);
-            console.error('Error details:', error);
-            throw error;
-        }
-    }
-
-    async ensureStructure() {
-        console.log('Ensuring file structure...');
-        let createdCount = 0;
-        let existingCount = 0;
-        let errorCount = 0;
-        
-        for (const [path, defaultContent] of Object.entries(this.initialFiles)) {
-            try {
-                console.log(`\nChecking file: ${path}`);
-                
-                // Try to read the file
-                const existingContent = await this.read(path);
-                
-                if (existingContent === null) {
-                    // File doesn't exist, create it
-                    console.log(`Creating new file: ${path}`);
-                    const success = await this.write(path, defaultContent);
-                    if (success) {
-                        createdCount++;
-                        console.log(`✅ Created: ${path}`);
-                    } else {
-                        errorCount++;
-                        console.error(`❌ Failed to create: ${path}`);
-                    }
-                } else {
-                    // File exists, check if it's empty
-                    const isEmpty = Object.keys(existingContent).length === 0 && 
-                                   !Array.isArray(existingContent);
-                    
-                    if (isEmpty) {
-                        console.log(`File exists but is empty, writing default content: ${path}`);
-                        const success = await this.write(path, defaultContent);
-                        if (success) {
-                            createdCount++;
-                            console.log(`✅ Populated: ${path}`);
-                        } else {
-                            errorCount++;
-                            console.error(`❌ Failed to populate: ${path}`);
-                        }
-                    } else {
-                        existingCount++;
-                        console.log(`✅ File exists with content: ${path}`);
-                    }
-                }
-                
-                // Small delay to avoid rate limiting
-                await new Promise(resolve => setTimeout(resolve, 100));
-                
-            } catch (error) {
-                errorCount++;
-                console.error(`❌ Error processing ${path}:`, error.message);
-                
-                // For critical errors, we might want to continue with other files
-                if (error.status === 401 || error.status === 403) {
-                    console.error('Authentication/permission error - stopping setup');
-                    throw error;
-                }
-            }
-        }
-        
-        console.log(`\n📊 Setup Summary:`);
-        console.log(`   Created: ${createdCount}`);
-        console.log(`   Existing: ${existingCount}`);
-        console.log(`   Errors: ${errorCount}`);
-        
-        if (errorCount > 0) {
-            throw new Error(`Failed to create ${errorCount} required files`);
-        }
-        
-        return true;
-    }
-
-    getPath(category, file) {
-        const categoryPaths = {
-            moderation: 'data/moderation/',
-            economy: 'data/economy/',
-            leveling: 'data/leveling/',
-            features: 'data/features/',
-            config: 'data/'
-        };
-        
-        const basePath = categoryPaths[category];
-        if (!basePath) throw new Error(`Unknown category: ${category}`);
-        return basePath + file;
-    }
-
-    clearCache() {
-        console.log('Clearing cache...');
-        this.cache.clear();
-    }
-
-    // Utility method to test a single file creation
-    async testCreateFile(path, content = {}) {
-        console.log(`Testing file creation: ${path}`);
-        try {
-            const success = await this.write(path, content);
-            if (success) {
-                console.log(`✅ Test creation successful: ${path}`);
-                return true;
-            } else {
-                console.log(`❌ Test creation failed: ${path}`);
-                return false;
-            }
-        } catch (error) {
-            console.error(`❌ Test creation error for ${path}:`, error.message);
-            return false;
-        }
-    }
-
-    // Debug method to check environment variables
-    checkEnvironment() {
-        console.log('Environment check:');
-        console.log(`GITHUB_TOKEN: ${process.env.GITHUB_TOKEN ? '✅ Set' : '❌ Missing'}`);
-        console.log(`GITHUB_OWNER: ${process.env.GITHUB_OWNER || '❌ Missing'}`);
-        console.log(`GITHUB_REPO: ${process.env.GITHUB_REPO || '❌ Missing'}`);
-        
-        if (!process.env.GITHUB_TOKEN || !process.env.GITHUB_OWNER || !process.env.GITHUB_REPO) {
-            throw new Error('Missing required environment variables');
-        }
-    }
-
-    async init() {
-        console.log('🚀 Starting database initialization...');
-        
-        try {
-            // Check environment variables first
-            this.checkEnvironment();
+            console.log(`   ✅ Successfully created file: ${response.data.commit.sha}`);
             
-            // Test connection and permissions
-            console.log('🔍 Testing GitHub connection and permissions...');
-            const hasPermissions = await this.checkPermissions();
-            if (!hasPermissions) {
-                throw new Error('Insufficient GitHub permissions');
-            }
-            console.log('✅ GitHub connection and permissions verified');
-
-            // Optional: Test creating a single file first
-            console.log('🧪 Testing file creation capability...');
-            const testSuccess = await this.testCreateFile('test.json', { test: true });
-            if (testSuccess) {
-                // Clean up test file
-                try {
-                    const testFile = await this.octokit.rest.repos.getContent({
-                        owner: this.owner,
-                        repo: this.repo,
-                        path: 'test.json'
-                    });
-                    await this.octokit.rest.repos.deleteFile({
-                        owner: this.owner,
-                        repo: this.repo,
-                        path: 'test.json',
-                        message: 'Delete test file',
-                        sha: testFile.data.sha
-                    });
-                    console.log('✅ Test file cleaned up');
-                } catch (e) {
-                    console.log('Test file cleanup skipped');
-                }
-            } else {
-                throw new Error('File creation test failed');
-            }
-
-            // Create and ensure all required files
-            console.log('📁 Creating required file structure...');
-            await this.ensureStructure();
-
-            console.log('🎉 Database initialization complete!');
-            return true;
+            // Clean up
+            await this.cleanupFile('debug-test.json', response.data.content.sha);
+            
         } catch (error) {
-            console.error('💥 Database initialization failed:', error.message);
-            return false;
+            console.error(`   ❌ Failed to create file: ${error.message}`);
+            if (error.status === 403) {
+                console.error('      This is a permission issue');
+            } else if (error.status === 422) {
+                console.error('      Validation error - check repository state');
+            }
         }
+    }
+
+    async testCreateFileInDirectory() {
+        console.log('📁 Test 2: Create file in directory');
+        try {
+            const testContent = { nested: true };
+
+            const response = await this.octokit.rest.repos.createOrUpdateFileContents({
+                owner: this.owner,
+                repo: this.repo,
+                path: 'debug/nested-test.json',
+                message: 'Debug nested file creation',
+                content: Buffer.from(JSON.stringify(testContent, null, 2)).toString('base64')
+            });
+
+            console.log(`   ✅ Successfully created nested file: ${response.data.commit.sha}`);
+            
+            // Clean up
+            await this.cleanupFile('debug/nested-test.json', response.data.content.sha);
+            
+        } catch (error) {
+            console.error(`   ❌ Failed to create nested file: ${error.message}`);
+        }
+    }
+
+    async testAlternativeWriteMethods() {
+        console.log('🔄 Test 3: Alternative write methods');
+        
+        // Method 1: Try with different API endpoint
+        try {
+            console.log('   Testing with repos.createFile (if it exists)...');
+            // This is actually the same endpoint, but checking anyway
+            const response = await this.octokit.request('PUT /repos/{owner}/{repo}/contents/{path}', {
+                owner: this.owner,
+                repo: this.repo,
+                path: 'debug-alt-test.json',
+                message: 'Alternative method test',
+                content: Buffer.from('{"alt": true}').toString('base64')
+            });
+            
+            console.log(`   ✅ Alternative method worked: ${response.data.commit.sha}`);
+            await this.cleanupFile('debug-alt-test.json', response.data.content.sha);
+            
+        } catch (error) {
+            console.error(`   ❌ Alternative method failed: ${error.message}`);
+        }
+    }
+
+    async cleanupFile(path, sha) {
+        try {
+            await this.octokit.rest.repos.deleteFile({
+                owner: this.owner,
+                repo: this.repo,
+                path: path,
+                message: `Cleanup debug file: ${path}`,
+                sha: sha
+            });
+            console.log(`   🧹 Cleaned up: ${path}`);
+        } catch (error) {
+            console.log(`   ⚠️  Could not cleanup ${path}: ${error.message}`);
+        }
+    }
+
+    async checkRepositorySettings() {
+        console.log('⚙️  REPOSITORY SETTINGS:');
+        console.log('=' .repeat(50));
+        
+        try {
+            const { data: repo } = await this.octokit.rest.repos.get({
+                owner: this.owner,
+                repo: this.repo
+            });
+            
+            console.log(`   Default branch: ${repo.default_branch}`);
+            console.log(`   Has issues: ${repo.has_issues}`);
+            console.log(`   Has wiki: ${repo.has_wiki}`);
+            console.log(`   Has pages: ${repo.has_pages}`);
+            console.log(`   Archived: ${repo.archived}`);
+            console.log(`   Disabled: ${repo.disabled}`);
+            console.log(`   Allow merge commit: ${repo.allow_merge_commit}`);
+            console.log(`   Allow squash merge: ${repo.allow_squash_merge}`);
+            console.log(`   Allow rebase merge: ${repo.allow_rebase_merge}`);
+            
+            // Check branch protection if applicable
+            try {
+                const { data: protection } = await this.octokit.rest.repos.getBranchProtection({
+                    owner: this.owner,
+                    repo: this.repo,
+                    branch: repo.default_branch
+                });
+                console.log(`   Branch protection: ENABLED`);
+                console.log(`     Required status checks: ${protection.required_status_checks?.strict || false}`);
+                console.log(`     Enforce admins: ${protection.enforce_admins?.enabled || false}`);
+                console.log(`     Restrict pushes: ${protection.restrictions?.users?.length > 0 || protection.restrictions?.teams?.length > 0}`);
+            } catch (protectionError) {
+                if (protectionError.status === 404) {
+                    console.log(`   Branch protection: DISABLED`);
+                } else {
+                    console.log(`   Branch protection: ERROR - ${protectionError.message}`);
+                }
+            }
+            
+        } catch (error) {
+            console.error('❌ Failed to check repository settings:', error.message);
+        }
+        console.log('');
+    }
+
+    // Utility method for quick fixes
+    async suggestFixes() {
+        console.log('💡 SUGGESTED FIXES:');
+        console.log('=' .repeat(50));
+        console.log('1. If using fine-grained tokens:');
+        console.log('   • Switch to classic personal access token');
+        console.log('   • Or ensure fine-grained token has "Contents" write permission');
+        console.log('');
+        console.log('2. If repository is an organization repo:');
+        console.log('   • Check organization third-party access restrictions');
+        console.log('   • Verify you have appropriate role in organization');
+        console.log('');
+        console.log('3. Check token scopes (for classic tokens):');
+        console.log('   • repo (full control of private repositories)');
+        console.log('   • public_repo (for public repositories only)');
+        console.log('');
+        console.log('4. Repository-specific issues:');
+        console.log('   • Branch protection rules may prevent direct commits');
+        console.log('   • Repository may be archived');
+        console.log('   • You may not have push access');
+        console.log('');
     }
 }
 
-// Create and initialize database instance
-const db = new Database();
-module.exports = db;
+// Usage function
+async function runDebug() {
+    const debug = new GitHubDebugger();
+    await debug.comprehensiveDebug();
+    await debug.suggestFixes();
+}
+
+// Export for use
+module.exports = { GitHubDebugger, runDebug };
+
+// If running directly
+if (require.main === module) {
+    runDebug().catch(console.error);
+}
