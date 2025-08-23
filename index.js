@@ -3,8 +3,13 @@ const { Client, GatewayIntentBits, Collection, Routes } = require('discord.js');
 const { REST } = require('@discordjs/rest');
 const fs = require('fs');
 const path = require('path');
+const https = require('https');
+const http = require('http');
 const database = require('./src/utils/database');
 const github = require('./src/utils/github'); // Fixed: Import entire module
+
+// Port configuration
+const PORT = process.env.PORT || 3000;
 
 const client = new Client({
     intents: [
@@ -19,6 +24,74 @@ const client = new Client({
 client.commands = new Collection();
 const commandsPath = path.join(__dirname, 'src/commands');
 const eventPath = path.join(__dirname, 'src/events');
+
+// Self-ping function to keep Render service alive
+const startSelfPing = () => {
+    const RENDER_URL = process.env.RENDER_EXTERNAL_URL || `https://your-app-name.onrender.com:${PORT}`;
+    
+    const ping = () => {
+        const url = new URL(RENDER_URL);
+        const options = {
+            hostname: url.hostname,
+            port: url.port || (url.protocol === 'https:' ? 443 : 80),
+            path: url.pathname || '/',
+            method: 'GET',
+            timeout: 30000
+        };
+
+        const requestModule = url.protocol === 'https:' ? https : http;
+        
+        const req = requestModule.request(options, (res) => {
+            console.log(`🏓 Self-ping successful: ${res.statusCode} - ${new Date().toLocaleTimeString()}`);
+        });
+
+        req.on('error', (err) => {
+            console.log(`⚠️  Self-ping failed: ${err.message} - ${new Date().toLocaleTimeString()}`);
+        });
+
+        req.on('timeout', () => {
+            console.log(`⏰ Self-ping timeout - ${new Date().toLocaleTimeString()}`);
+            req.destroy();
+        });
+
+        req.end();
+    };
+
+    // Initial ping after 1 minute
+    setTimeout(() => {
+        console.log('🚀 Starting self-ping service...');
+        console.log(`🌐 Pinging URL: ${RENDER_URL}`);
+        ping();
+        
+        // Then ping every 10 minutes (600,000 ms)
+        setInterval(ping, 10 * 60 * 1000);
+    }, 60 * 1000);
+};
+
+// Simple HTTP server to respond to health checks
+const startHealthServer = () => {
+    const server = http.createServer((req, res) => {
+        if (req.url === '/' || req.url === '/health') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+                status: 'ok',
+                timestamp: new Date().toISOString(),
+                uptime: process.uptime(),
+                bot: client.user ? `${client.user.tag} (${client.user.id})` : 'Not logged in',
+                guilds: client.guilds ? client.guilds.cache.size : 0
+            }));
+        } else {
+            res.writeHead(404, { 'Content-Type': 'text/plain' });
+            res.end('Not Found');
+        }
+    });
+
+    server.listen(PORT, () => {
+        console.log(`🌐 Health server listening on port ${PORT}`);
+    });
+
+    return server;
+};
 
 // Initialize the bot
 async function initialize() {
@@ -183,6 +256,12 @@ client.once('ready', async () => {
     
     // Set bot status
     client.user.setActivity('slash commands', { type: 'LISTENING' });
+    
+    // Start health server
+    startHealthServer();
+    
+    // Start self-ping to keep Render service alive
+    startSelfPing();
 });
 
 // Error handling
