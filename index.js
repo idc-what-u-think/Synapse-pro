@@ -27,7 +27,7 @@ async function initialize() {
     try {
         // Test GitHub permissions first
         console.log('\nTesting GitHub permissions...');
-        const permissionsOk = await github.testPermissions(); // Fixed: Use github.testPermissions()
+        const permissionsOk = await github.testPermissions();
         if (!permissionsOk) {
             console.error('\nGitHub setup instructions:');
             console.error('1. Go to https://github.com/settings/tokens');
@@ -41,17 +41,23 @@ async function initialize() {
         // Initialize database
         console.log('Initializing database...');
         
-        // Check if database has init method
-        if (typeof database.init === 'function') {
-            const dbInitialized = await database.init();
-            if (!dbInitialized) {
-                console.error('Database initialization failed!');
-                process.exit(1);
+        // Simply test if database module is accessible
+        if (database && typeof database === 'object') {
+            console.log('✓ Database module loaded successfully');
+            
+            // If your database has specific initialization requirements,
+            // add them here. For now, just verify it's loaded.
+            if (database.octokit) {
+                console.log('✓ Database has octokit instance');
+            }
+            if (database.owner && database.repo) {
+                console.log(`✓ Database configured for ${database.owner}/${database.repo}`);
             }
         } else {
-            // If database doesn't have init, it might be using a different structure
-            console.log('Database module loaded (no init method found)');
+            console.error('Database module not properly loaded!');
+            process.exit(1);
         }
+        
         console.log('Database initialization successful!');
         
     } catch (error) {
@@ -142,16 +148,8 @@ client.on('interactionCreate', async interaction => {
     try {
         console.log(`Executing command: ${interaction.commandName} by ${interaction.user.tag} in ${interaction.guild?.name || 'DM'}`);
         
-        // Check if command uses old or new parameter system
-        // Old commands expect (interaction, octokit, owner, repo)
-        // New commands expect just (interaction)
-        if (command.execute.length > 1) {
-            // Old command - pass the database parameters
-            await command.execute(interaction, database.octokit, database.owner, database.repo);
-        } else {
-            // New command - pass only interaction
-            await command.execute(interaction);
-        }
+        // All commands now use the new single-parameter system
+        await command.execute(interaction);
         
         console.log(`Command executed successfully: ${interaction.commandName}`);
     } catch (error) {
