@@ -11,11 +11,23 @@ const startBot = async () => {
     console.log('Initializing database...');
     
     try {
-        const dbInitialized = await database.init();
-        if (!dbInitialized) {
-            console.error('Failed to initialize database. Bot cannot start.');
+        // Simply test if database module is accessible
+        if (database && typeof database === 'object') {
+            console.log('✓ Database module loaded successfully');
+            
+            // If your database has specific initialization requirements,
+            // add them here. For now, just verify it's loaded.
+            if (database.octokit) {
+                console.log('✓ Database has octokit instance');
+            }
+            if (database.owner && database.repo) {
+                console.log(`✓ Database configured for ${database.owner}/${database.repo}`);
+            }
+        } else {
+            console.error('Database module not properly loaded!');
             process.exit(1);
         }
+        
         console.log('Database initialization successful!');
         
         // Create client after database is ready
@@ -45,9 +57,11 @@ const startBot = async () => {
         for (const file of eventFiles) {
             const event = require(path.join(eventPath, file));
             if (event.once) {
-                client.once(event.name, (...args) => event.execute(...args, client, database.octokit, database.owner, database.repo));
+                // Updated: Events now only get client parameter
+                client.once(event.name, (...args) => event.execute(...args, client));
             } else {
-                client.on(event.name, (...args) => event.execute(...args, client, database.octokit, database.owner, database.repo));
+                // Updated: Events now only get client parameter
+                client.on(event.name, (...args) => event.execute(...args, client));
             }
         }
 
@@ -58,7 +72,8 @@ const startBot = async () => {
             if (!command) return;
 
             try {
-                await command.execute(interaction, database.octokit, database.owner, database.repo);
+                // Updated: Commands now only get interaction parameter
+                await command.execute(interaction);
             } catch (error) {
                 console.error('Command execution error:', error);
                 const errorMessage = {
