@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { getConfig, getBalances, saveBalances } = require('../utils/github');
+const { getConfig, getBalances, saveBalances, getBankData, saveBankData } = require('../utils/github');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -20,11 +20,8 @@ module.exports = {
 
     async execute(interaction) {
         try {
-            // DEFER IMMEDIATELY to prevent timeout
             await interaction.deferReply();
-            console.log(`Coinflip command started by ${interaction.user.tag}`);
 
-            // Check if command is used in a guild
             if (!interaction.guild) {
                 return await interaction.editReply({
                     content: '❌ This command can only be used in a server, not in DMs.'
@@ -34,18 +31,17 @@ module.exports = {
             const bet = interaction.options.getInteger('bet');
             const userChoice = interaction.options.getString('choice');
             
-            // Handle case where choice option doesn't exist (old command registration)
             if (!userChoice) {
                 return await interaction.editReply({
-                    content: '❌ Please use the updated command: `/coinflip bet:<amount> choice:<heads/tails>`\n\nThe bot needs to be restarted or commands re-registered to use the new format.'
+                    content: '❌ Please use the updated command: `/coinflip bet:<amount> choice:<heads/tails>`'
                 });
             }
             
-            // Get config and balance data
-            console.log('Fetching config and balance data...');
-            const [config, balancesData] = await Promise.all([
+            // Get config, balance and bank data
+            const [config, balancesData, bankData] = await Promise.all([
                 getConfig(),
-                getBalances()
+                getBalances(),
+                getBankData()
             ]);
             
             // Get settings with defaults
@@ -71,8 +67,16 @@ module.exports = {
                 });
             }
 
-            console.log(`${interaction.user.tag} betting ${bet} coins on ${userChoice} (balance: ${userBalance})`);
+            // Check bank balance for potential winnings (2x bet)
+            const currentBankBalance = bankData.balance || 10000000;
+            const potentialWinnings = bet * 2; // 2x payout
             
+            if (currentBankBalance < potentialWinnings) {
+                return await interaction.editReply({
+                    content: '❌ The server bank doesn\'t have enough funds for this bet!'
+                });
+            }
+
             // Animated coin flip
             await interaction.editReply(`🪙 Flipping coin... You chose **${userChoice.charAt(0).toUpperCase() + userChoice.slice(1)}**!`);
             await new Promise(resolve => setTimeout(resolve, 800));
@@ -86,13 +90,51 @@ module.exports = {
             // Determine the actual result
             const coinResult = Math.random() < 0.5 ? 'heads' : 'tails';
             const win = userChoice === coinResult;
-            const newBalance = win ? userBalance + bet : userBalance - bet;
             
-            // Update balance
+            let newBalance;
+            let updatedBankData = {
+                balance: currentBankBalance,
+                lastUpdated: new Date().toISOString(),
+                totalDistributed: bankData.totalDistributed || 0,
+                transactions: bankData.transactions || []
+            };
+
+            if (win) {
+                // User wins: gets 2x bet amount, bank pays out
+                newBalance = userBalance + potentialWinnings;
+                updatedBankData.balance -= potentialWinnings;
+                updatedBankData.totalDistributed += potentialWinnings;
+                updatedBankData.transactions.push({
+                    type: 'coinflip_win',
+                    userId: interaction.user.id,
+                    username: interaction.user.tag,
+                    amount: potentialWinnings,
+                    timestamp: new Date().toISOString()
+                });
+            } else {
+                // User loses: loses bet amount, money goes to bank
+                newBalance = userBalance - bet;
+                updatedBankData.balance += bet;
+                updatedBankData.transactions.push({
+                    type: 'coinflip_loss',
+                    userId: interaction.user.id,
+                    username: interaction.user.tag,
+                    amount: -bet,
+                    timestamp: new Date().toISOString()
+                });
+            }
+
+            // Keep only last 100 transactions
+            if (updatedBankData.transactions.length > 100) {
+                updatedBankData.transactions = updatedBankData.transactions.slice(-100);
+            }
+            
+            // Update balance and bank
             balancesData[interaction.user.id] = newBalance;
-            await saveBalances(balancesData, `Coinflip: ${interaction.user.tag} ${win ? 'won' : 'lost'} ${bet} coins`);
-            
-            console.log(`${interaction.user.tag} ${win ? 'won' : 'lost'} ${bet} coins. Coin: ${coinResult}, Choice: ${userChoice}, New balance: ${newBalance}`);
+            await Promise.all([
+                saveBalances(balancesData, `Coinflip: ${interaction.user.tag} ${win ? 'won' : 'lost'} ${win ? potentialWinnings : bet} coins`),
+                saveBankData(updatedBankData, `Coinflip ${win ? 'payout' : 'collection'}: ${win ? potentialWinnings : bet} coins`)
+            ]);
 
             // Create result embed
             const resultDisplay = coinResult.charAt(0).toUpperCase() + coinResult.slice(1);
@@ -107,17 +149,30 @@ module.exports = {
                     { name: 'Your Choice', value: choiceDisplay, inline: true },
                     { name: 'Coin Result', value: resultDisplay, inline: true },
                     { name: 'Bet Amount', value: `${currency} ${bet}`, inline: true },
-                    { name: win ? 'Winnings' : 'Lost', value: `${currency} ${bet}`, inline: true },
+                    { name: win ? 'Winnings (2x)' : 'Lost', value: `${currency} ${win ? potentialWinnings : bet}`, inline: true },
                     { name: 'New Balance', value: `${currency} ${newBalance}`, inline: true },
-                    { name: '\u200B', value: '\u200B', inline: true } // Empty field for formatting
+                    { name: 'Bank Balance', value: `${currency} ${updatedBankData.balance.toLocaleString()}`, inline: true }
                 )
                 .setFooter({ text: `${interaction.user.tag}` })
                 .setTimestamp();
 
+            // Send ephemeral result to user
             await interaction.editReply({ 
-                content: null, 
-                embeds: [embed] 
+                content: `${win ? '🎉 You won!' : '😢 You lost!'} Check the game channel for details.`,
             });
+
+            // Send detailed result to game channel
+            try {
+                const gameChannelId = process.env.GAME_CHANNEL_ID;
+                if (gameChannelId) {
+                    const gameChannel = client.channels.cache.get(gameChannelId);
+                    if (gameChannel) {
+                        await gameChannel.send({ embeds: [embed] });
+                    }
+                }
+            } catch (channelError) {
+                console.error('Error sending to game channel:', channelError);
+            }
 
         } catch (error) {
             console.error('Coinflip command error:', error);
