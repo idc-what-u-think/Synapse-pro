@@ -54,10 +54,11 @@ module.exports = {
             const maxBet = gamblingSettings.maxBet || 10000;
             const currency = guildSettings.currency || '💰';
 
-            // Validate bet amount
-            if (bet < minBet || bet > maxBet) {
+            // Validate bet amount (minimum 100 for coinflip)
+            const actualMinBet = Math.max(minBet, 100);
+            if (bet < actualMinBet || bet > maxBet) {
                 return await interaction.editReply({
-                    content: `❌ Bet must be between ${minBet} and ${maxBet} coins`
+                    content: `❌ Bet must be between ${actualMinBet} and ${maxBet} coins`
                 });
             }
 
@@ -70,9 +71,9 @@ module.exports = {
                 });
             }
 
-            // Check bank balance for potential winnings (2x bet)
+            // Check bank balance for potential winnings (1x bet)
             const currentBankBalance = bankData.balance || 10000000;
-            const potentialWinnings = bet * 2; // 2x payout
+            const potentialWinnings = bet; // 1x payout (user doubles their money: bet back + bet winnings)
             
             if (currentBankBalance < potentialWinnings) {
                 return await interaction.editReply({
@@ -101,7 +102,7 @@ module.exports = {
             };
 
             if (win) {
-                // User wins: gets 2x bet amount, bank pays out
+                // User wins: gets bet amount (doubling their money), bank loses bet amount
                 newBalance = userBalance + potentialWinnings;
                 updatedBankData.balance -= potentialWinnings;
                 updatedBankData.totalDistributed += potentialWinnings;
@@ -155,7 +156,7 @@ module.exports = {
                     { name: 'Player Choice', value: choiceDisplay, inline: true },
                     { name: 'Coin Result', value: resultDisplay, inline: true },
                     { name: 'Bet Amount', value: `${currency} ${bet}`, inline: true },
-                    { name: win ? 'Winnings (2x)' : 'Lost', value: `${currency} ${win ? potentialWinnings : bet}`, inline: true },
+                    { name: win ? 'Winnings' : 'Lost', value: `${currency} ${win ? potentialWinnings : bet}`, inline: true },
                     { name: 'New Balance', value: `${currency} ${newBalance}`, inline: true },
                     { name: 'Bank Balance', value: `${currency} ${updatedBankData.balance.toLocaleString()}`, inline: true }
                 )
