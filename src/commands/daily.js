@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { getConfig, getBalances, saveBalances, getDaily, saveDaily } = require('../utils/github');
+const { getConfig, getBalances, saveBalances, getDaily, saveDaily, getBankData, saveBankData } = require('../utils/github');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -8,17 +8,17 @@ module.exports = {
 
     async execute(interaction) {
         try {
-            // Defer immediately to prevent timeout
             await interaction.deferReply({ ephemeral: true });
 
             const userId = interaction.user.id;
             const guildId = interaction.guild.id;
 
             // Get all necessary data
-            const [config, balancesData, dailyData] = await Promise.all([
+            const [config, balancesData, dailyData, bankData] = await Promise.all([
                 getConfig(),
                 getBalances(),
-                getDaily()
+                getDaily(),
+                getBankData()
             ]);
 
             // Check if user already claimed today
@@ -36,57 +36,70 @@ module.exports = {
                 });
             }
 
-            // Get settings
+            // Fixed daily amount: 200 coins
+            const dailyAmount = 200;
+            
+            // Get currency setting
             const guildSettings = config?.guilds?.[guildId]?.settings || {};
-            const dailySettings = guildSettings.daily || {};
-            const baseAmount = dailySettings.amount || 200;
             const currency = guildSettings.currency || '💰';
 
-            // Calculate streak
-            let streak = userDailyData?.streak || 0;
-            if (lastDaily && now - lastDaily < 48 * 60 * 60 * 1000) {
-                // Claimed within 48 hours, continue streak
-                streak++;
-            } else {
-                // Reset streak
-                streak = 1;
+            // Check bank balance
+            const currentBankBalance = bankData.balance || 10000000;
+            if (currentBankBalance < dailyAmount) {
+                return await interaction.editReply({
+                    content: '❌ The server bank is empty! Daily rewards are temporarily unavailable.'
+                });
             }
-
-            // Calculate bonus (5% per day up to 50% max)
-            const bonusPercentage = Math.min(streak * 5, 50);
-            const bonusAmount = Math.floor(baseAmount * (bonusPercentage / 100));
-            const totalAmount = baseAmount + bonusAmount;
 
             // Update user balance
             const currentBalance = balancesData[userId] || 0;
-            const newBalance = currentBalance + totalAmount;
+            const newBalance = currentBalance + dailyAmount;
             balancesData[userId] = newBalance;
 
             // Update daily data
             if (!dailyData[userId]) dailyData[userId] = {};
             dailyData[userId].lastClaimed = now.toISOString();
-            dailyData[userId].streak = streak;
-            dailyData[userId].totalClaimed = (dailyData[userId].totalClaimed || 0) + totalAmount;
+            dailyData[userId].totalClaimed = (dailyData[userId].totalClaimed || 0) + dailyAmount;
 
-            // Save both files
+            // Update bank data
+            const newBankBalance = currentBankBalance - dailyAmount;
+            const updatedBankData = {
+                balance: newBankBalance,
+                lastUpdated: now.toISOString(),
+                totalDistributed: (bankData.totalDistributed || 0) + dailyAmount,
+                transactions: bankData.transactions || []
+            };
+            
+            // Add transaction record
+            updatedBankData.transactions.push({
+                type: 'daily',
+                userId: userId,
+                username: interaction.user.tag,
+                amount: dailyAmount,
+                timestamp: now.toISOString()
+            });
+
+            // Keep only last 100 transactions to prevent file getting too large
+            if (updatedBankData.transactions.length > 100) {
+                updatedBankData.transactions = updatedBankData.transactions.slice(-100);
+            }
+
+            // Save all data
             await Promise.all([
-                saveBalances(balancesData, `Daily reward: ${interaction.user.tag} claimed ${totalAmount} coins`),
-                saveDaily(dailyData, `Daily streak: ${interaction.user.tag} day ${streak}`)
+                saveBalances(balancesData, `Daily reward: ${interaction.user.tag} claimed ${dailyAmount} coins`),
+                saveDaily(dailyData, `Daily claim: ${interaction.user.tag}`),
+                saveBankData(updatedBankData, `Daily reward deduction: ${dailyAmount} coins to ${interaction.user.tag}`)
             ]);
-
-            console.log(`${interaction.user.tag} claimed daily reward: ${totalAmount} coins (${streak} day streak)`);
 
             const embed = new EmbedBuilder()
                 .setColor(0x00FF00)
                 .setTitle('Daily Reward Claimed!')
                 .addFields(
-                    { name: 'Base Amount', value: `${currency} ${baseAmount.toLocaleString()}`, inline: true },
-                    { name: 'Streak Bonus', value: `${currency} ${bonusAmount.toLocaleString()} (+${bonusPercentage}%)`, inline: true },
-                    { name: 'Total Received', value: `${currency} ${totalAmount.toLocaleString()}`, inline: true },
-                    { name: 'Current Streak', value: `${streak} day${streak === 1 ? '' : 's'}`, inline: true },
-                    { name: 'New Balance', value: `${currency} ${newBalance.toLocaleString()}`, inline: true }
+                    { name: 'Amount Received', value: `${currency} ${dailyAmount.toLocaleString()}`, inline: true },
+                    { name: 'New Balance', value: `${currency} ${newBalance.toLocaleString()}`, inline: true },
+                    { name: 'Bank Remaining', value: `${currency} ${newBankBalance.toLocaleString()}`, inline: true }
                 )
-                .setFooter({ text: `Come back in 24 hours for day ${streak + 1}!` })
+                .setFooter({ text: 'Come back in 24 hours for your next daily reward!' })
                 .setTimestamp();
 
             await interaction.editReply({ embeds: [embed] });
