@@ -20,7 +20,10 @@ module.exports = {
 
     async execute(interaction) {
         try {
-            await interaction.deferReply();
+            // Acknowledge the interaction immediately with ephemeral response
+            await interaction.deferReply({ 
+                flags: 64 // InteractionResponseFlags.Ephemeral
+            });
 
             if (!interaction.guild) {
                 return await interaction.editReply({
@@ -77,15 +80,13 @@ module.exports = {
                 });
             }
 
-            // Animated coin flip
+            // Shorter animated coin flip to avoid timeout
             await interaction.editReply(`🪙 Flipping coin... You chose **${userChoice.charAt(0).toUpperCase() + userChoice.slice(1)}**!`);
-            await new Promise(resolve => setTimeout(resolve, 800));
-            await interaction.editReply('🌕 Flipping coin...');
-            await new Promise(resolve => setTimeout(resolve, 600));
-            await interaction.editReply('🌓 Flipping coin...');
-            await new Promise(resolve => setTimeout(resolve, 600));
-            await interaction.editReply('🌑 Flipping coin...');
-            await new Promise(resolve => setTimeout(resolve, 800));
+            await new Promise(resolve => setTimeout(resolve, 500));
+            await interaction.editReply('🌕 Flipping...');
+            await new Promise(resolve => setTimeout(resolve, 400));
+            await interaction.editReply('🌓 Flipping...');
+            await new Promise(resolve => setTimeout(resolve, 400));
             
             // Determine the actual result
             const coinResult = Math.random() < 0.5 ? 'heads' : 'tails';
@@ -136,17 +137,22 @@ module.exports = {
                 saveBankData(updatedBankData, `Coinflip ${win ? 'payout' : 'collection'}: ${win ? potentialWinnings : bet} coins`)
             ]);
 
-            // Create result embed
+            // Send ephemeral result to user
+            await interaction.editReply({
+                content: `${win ? '🎉 You won!' : '😢 You lost!'} Check the game channel for details.`
+            });
+
+            // Create result embed for game channel
             const resultDisplay = coinResult.charAt(0).toUpperCase() + coinResult.slice(1);
             const choiceDisplay = userChoice.charAt(0).toUpperCase() + userChoice.slice(1);
             const coinEmoji = coinResult === 'heads' ? '🪙' : '🥈';
             
             const embed = new EmbedBuilder()
                 .setColor(win ? 0x00FF00 : 0xFF0000)
-                .setTitle(win ? '🎉 You Won!' : '😢 You Lost!')
-                .setDescription(`${coinEmoji} The coin landed on **${resultDisplay}**!\nYou chose **${choiceDisplay}**.`)
+                .setTitle(win ? '🎉 Coinflip Winner!' : '😢 Coinflip Loss')
+                .setDescription(`${coinEmoji} The coin landed on **${resultDisplay}**!\n<@${interaction.user.id}> chose **${choiceDisplay}**.`)
                 .addFields(
-                    { name: 'Your Choice', value: choiceDisplay, inline: true },
+                    { name: 'Player Choice', value: choiceDisplay, inline: true },
                     { name: 'Coin Result', value: resultDisplay, inline: true },
                     { name: 'Bet Amount', value: `${currency} ${bet}`, inline: true },
                     { name: win ? 'Winnings (2x)' : 'Lost', value: `${currency} ${win ? potentialWinnings : bet}`, inline: true },
@@ -156,19 +162,18 @@ module.exports = {
                 .setFooter({ text: `${interaction.user.tag}` })
                 .setTimestamp();
 
-            // Send ephemeral result to user
-            await interaction.editReply({ 
-                content: `${win ? '🎉 You won!' : '😢 You lost!'} Check the game channel for details.`,
-            });
-
             // Send detailed result to game channel
             try {
                 const gameChannelId = process.env.GAME_CHANNEL_ID;
                 if (gameChannelId) {
-                    const gameChannel = client.channels.cache.get(gameChannelId);
+                    const gameChannel = interaction.client.channels.cache.get(gameChannelId);
                     if (gameChannel) {
                         await gameChannel.send({ embeds: [embed] });
+                    } else {
+                        console.log('Game channel not found in cache');
                     }
+                } else {
+                    console.log('GAME_CHANNEL_ID not set in environment variables');
                 }
             } catch (channelError) {
                 console.error('Error sending to game channel:', channelError);
@@ -181,7 +186,7 @@ module.exports = {
                 if (!interaction.replied && !interaction.deferred) {
                     await interaction.reply({
                         content: '❌ An error occurred while flipping the coin.',
-                        ephemeral: true
+                        flags: 64 // Ephemeral flag
                     });
                 } else {
                     await interaction.editReply({
