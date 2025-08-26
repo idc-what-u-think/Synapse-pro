@@ -6,25 +6,31 @@ const DICE_EMOJIS = ['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('dice')
-        .setDescription('Roll a dice and bet coins')
+        .setDescription('Roll a dice and bet coins on two numbers with different multipliers')
         .addIntegerOption(option =>
             option.setName('bet')
                 .setDescription('Amount to bet')
                 .setRequired(true))
         .addIntegerOption(option =>
-            option.setName('number')
-                .setDescription('Number to bet on (1-6)')
+            option.setName('number1')
+                .setDescription('First number to bet on (1-6)')
+                .setRequired(true)
+                .setMinValue(1)
+                .setMaxValue(6))
+        .addIntegerOption(option =>
+            option.setName('number2')
+                .setDescription('Second number to bet on (1-6)')
                 .setRequired(true)
                 .setMinValue(1)
                 .setMaxValue(6))
         .addStringOption(option =>
-            option.setName('risk')
-                .setDescription('Risk level - affects payout multiplier')
+            option.setName('multipliers')
+                .setDescription('Choose multiplier pair')
                 .setRequired(true)
                 .addChoices(
-                    { name: '3x Payout (2 numbers win)', value: '3x' },
-                    { name: '4x Payout (1 number wins)', value: '4x' },
-                    { name: '6x Payout (4 numbers win) - Min bet 1500', value: '6x' }
+                    { name: '4x,1x - Higher risk/reward', value: '4x,1x' },
+                    { name: '3x,2x - Medium risk/reward', value: '3x,2x' },
+                    { name: '6x,4x - Highest risk/reward (Min bet 1500)', value: '6x,4x' }
                 )),
 
     async execute(interaction) {
@@ -41,8 +47,21 @@ module.exports = {
             }
 
             const bet = interaction.options.getInteger('bet');
-            const targetNumber = interaction.options.getInteger('number');
-            const riskLevel = interaction.options.getString('risk');
+            const number1 = interaction.options.getInteger('number1');
+            const number2 = interaction.options.getInteger('number2');
+            const multipliersChoice = interaction.options.getString('multipliers');
+
+            // Check if numbers are different
+            if (number1 === number2) {
+                return await interaction.editReply({
+                    content: '❌ You must pick two different numbers!'
+                });
+            }
+
+            // Parse multipliers
+            const [mult1Str, mult2Str] = multipliersChoice.split(',');
+            const multiplier1 = parseInt(mult1Str.replace('x', ''));
+            const multiplier2 = parseInt(mult2Str.replace('x', ''));
 
             // Get config, balance and bank data
             const [config, balancesData, bankData] = await Promise.all([
@@ -58,15 +77,15 @@ module.exports = {
             const maxBet = gamblingSettings.maxBet || 10000;
             const currency = guildSettings.currency || '💰';
 
-            // Validate bet amount (minimum 100 for dice, 1500 for 6x risk)
+            // Validate bet amount (minimum 100 for dice, 1500 for 6x,4x)
             let actualMinBet = Math.max(minBet, 100);
-            if (riskLevel === '6x') {
+            if (multipliersChoice === '6x,4x') {
                 actualMinBet = Math.max(actualMinBet, 1500);
             }
 
             if (bet < actualMinBet || bet > maxBet) {
                 return await interaction.editReply({
-                    content: `❌ Bet must be between ${actualMinBet} and ${maxBet} coins${riskLevel === '6x' ? ' (minimum 1500 for 6x risk)' : ''}`
+                    content: `❌ Bet must be between ${actualMinBet} and ${maxBet} coins${multipliersChoice === '6x,4x' ? ' (minimum 1500 for 6x,4x)' : ''}`
                 });
             }
 
@@ -77,53 +96,43 @@ module.exports = {
                 });
             }
 
-            // Determine win conditions and multipliers based on risk level
-            let winCondition, multiplier, riskDescription;
-            switch (riskLevel) {
-                case '3x':
-                    // 3x payout: win if roll is target number OR target number + 1 (wrapping 6->1)
-                    const secondNumber = targetNumber === 6 ? 1 : targetNumber + 1;
-                    winCondition = (roll) => roll === targetNumber || roll === secondNumber;
-                    multiplier = 2; // Net gain of 2x bet (user gets 3x total: bet back + 2x bet winnings)
-                    riskDescription = `${targetNumber} or ${secondNumber}`;
-                    break;
-                case '4x':
-                    // 4x payout: win only on exact number
-                    winCondition = (roll) => roll === targetNumber;
-                    multiplier = 3; // Net gain of 3x bet (user gets 4x total: bet back + 3x bet winnings)
-                    riskDescription = `${targetNumber}`;
-                    break;
-                case '6x':
-                    // 6x payout: win if roll is NOT target number AND NOT opposite number
-                    const oppositeNumber = targetNumber <= 3 ? targetNumber + 3 : targetNumber - 3;
-                    winCondition = (roll) => roll !== targetNumber && roll !== oppositeNumber;
-                    multiplier = 5; // Net gain of 5x bet (user gets 6x total: bet back + 5x bet winnings)
-                    riskDescription = `any number except ${targetNumber} and ${oppositeNumber}`;
-                    break;
-            }
-
-            // Check bank balance for potential winnings
+            // Check bank balance for potential maximum winnings
             const currentBankBalance = bankData.balance || 10000000;
-            const potentialWinnings = bet * multiplier;
+            const maxMultiplier = Math.max(multiplier1, multiplier2);
+            const maxPotentialWinnings = bet * (maxMultiplier - 1); // Net winnings (subtract original bet)
             
-            if (currentBankBalance < potentialWinnings) {
+            if (currentBankBalance < maxPotentialWinnings) {
                 return await interaction.editReply({
-                    content: '❌ The server bank doesn\'t have enough funds for this bet!'
+                    content: '❌ The server bank doesn\'t have enough funds for this potential payout!'
                 });
             }
 
-            console.log(`${interaction.user.tag} betting ${bet} on ${riskDescription} (${riskLevel}) - balance: ${userBalance}`);
+            console.log(`${interaction.user.tag} betting ${bet} on ${number1}(${multiplier1}x) and ${number2}(${multiplier2}x) - balance: ${userBalance}`);
 
             // Animated dice roll
-            await interaction.editReply(`🎲 Rolling dice... You need: **${riskDescription}** (${riskLevel} payout)`);
+            await interaction.editReply(`🎲 Rolling dice... You picked: **${number1}** (${multiplier1}x) and **${number2}** (${multiplier2}x)`);
             await new Promise(resolve => setTimeout(resolve, 400));
             await interaction.editReply('🎲 Rolling... ' + DICE_EMOJIS[Math.floor(Math.random() * 6 + 1)]);
             await new Promise(resolve => setTimeout(resolve, 400));
             
             const roll = Math.floor(Math.random() * 6) + 1;
-            const win = winCondition(roll);
             
+            let win = false;
+            let winMultiplier = 0;
+            let netWinnings = 0;
             let newBalance;
+
+            // Check if player won
+            if (roll === number1) {
+                win = true;
+                winMultiplier = multiplier1;
+                netWinnings = bet * (multiplier1 - 1); // Net winnings (total payout - original bet)
+            } else if (roll === number2) {
+                win = true;
+                winMultiplier = multiplier2;
+                netWinnings = bet * (multiplier2 - 1); // Net winnings (total payout - original bet)
+            }
+
             let updatedBankData = {
                 balance: currentBankBalance,
                 lastUpdated: new Date().toISOString(),
@@ -132,20 +141,23 @@ module.exports = {
             };
 
             if (win) {
-                // User wins: gets multiplier * bet as winnings, bank loses that amount
-                newBalance = userBalance + potentialWinnings;
-                updatedBankData.balance -= potentialWinnings;
-                updatedBankData.totalDistributed += potentialWinnings;
+                // Player wins: gets net winnings, bank loses that amount
+                newBalance = userBalance + netWinnings;
+                updatedBankData.balance -= netWinnings;
+                updatedBankData.totalDistributed += netWinnings;
                 updatedBankData.transactions.push({
                     type: 'dice_win',
                     userId: interaction.user.id,
                     username: interaction.user.tag,
-                    amount: potentialWinnings,
-                    riskLevel: riskLevel,
+                    amount: netWinnings,
+                    multiplier: winMultiplier,
+                    rolledNumber: roll,
+                    selectedNumbers: `${number1},${number2}`,
+                    multiplierChoice: multipliersChoice,
                     timestamp: new Date().toISOString()
                 });
             } else {
-                // User loses: loses bet amount, money goes to bank
+                // Player loses: loses bet amount, money goes to bank
                 newBalance = userBalance - bet;
                 updatedBankData.balance += bet;
                 updatedBankData.transactions.push({
@@ -153,7 +165,9 @@ module.exports = {
                     userId: interaction.user.id,
                     username: interaction.user.tag,
                     amount: -bet,
-                    riskLevel: riskLevel,
+                    rolledNumber: roll,
+                    selectedNumbers: `${number1},${number2}`,
+                    multiplierChoice: multipliersChoice,
                     timestamp: new Date().toISOString()
                 });
             }
@@ -166,11 +180,11 @@ module.exports = {
             // Update balance and bank
             balancesData[interaction.user.id] = newBalance;
             await Promise.all([
-                saveBalances(balancesData, `Dice roll (${riskLevel}): ${interaction.user.tag} ${win ? 'won' : 'lost'} ${win ? potentialWinnings : bet} coins`),
-                saveBankData(updatedBankData, `Dice ${win ? 'payout' : 'collection'} (${riskLevel}): ${win ? potentialWinnings : bet} coins`)
+                saveBalances(balancesData, `Dice roll: ${interaction.user.tag} ${win ? 'won' : 'lost'} ${win ? netWinnings : bet} coins`),
+                saveBankData(updatedBankData, `Dice ${win ? 'payout' : 'collection'}: ${win ? netWinnings : bet} coins`)
             ]);
 
-            console.log(`${interaction.user.tag} rolled ${roll}, ${win ? 'won' : 'lost'}. New balance: ${newBalance}`);
+            console.log(`${interaction.user.tag} rolled ${roll}, ${win ? `won ${winMultiplier}x` : 'lost'}. New balance: ${newBalance}`);
 
             // Send ephemeral result to user
             await interaction.editReply({
@@ -181,13 +195,13 @@ module.exports = {
             const embed = new EmbedBuilder()
                 .setColor(win ? 0x00FF00 : 0xFF0000)
                 .setTitle(win ? '🎉 Dice Winner!' : '😢 Dice Loss')
-                .setDescription(`🎲 ${DICE_EMOJIS[roll]} Rolled **${roll}**!\n<@${interaction.user.id}> needed: **${riskDescription}** (${riskLevel} risk)`)
+                .setDescription(`🎲 ${DICE_EMOJIS[roll]} Rolled **${roll}**!\n<@${interaction.user.id}> picked: **${number1}** (${multiplier1}x) and **${number2}** (${multiplier2}x)`)
                 .addFields(
-                    { name: 'Risk Level', value: riskLevel, inline: true },
-                    { name: 'Win Condition', value: riskDescription, inline: true },
+                    { name: 'Selected Numbers', value: `${number1} (${multiplier1}x), ${number2} (${multiplier2}x)`, inline: true },
                     { name: 'Rolled', value: `${DICE_EMOJIS[roll]} (${roll})`, inline: true },
+                    { name: 'Result', value: win ? `Hit ${roll} for ${winMultiplier}x!` : 'No match', inline: true },
                     { name: 'Bet Amount', value: `${currency} ${bet}`, inline: true },
-                    { name: win ? `Winnings (${riskLevel})` : 'Lost', value: `${currency} ${(win ? potentialWinnings : bet).toLocaleString()}`, inline: true },
+                    { name: win ? `Winnings (${winMultiplier}x total)` : 'Lost', value: `${currency} ${(win ? netWinnings : bet).toLocaleString()}`, inline: true },
                     { name: 'New Balance', value: `${currency} ${newBalance.toLocaleString()}`, inline: true }
                 )
                 .setFooter({ text: `${interaction.user.tag}` })
