@@ -1,12 +1,12 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Collection, Routes } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, Routes, EmbedBuilder } = require('discord.js');
 const { REST } = require('@discordjs/rest');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const http = require('http');
 const database = require('./src/utils/database');
-const github = require('./src/utils/github'); // Fixed: Import entire module
+const github = require('./src/utils/github');
 
 // Port configuration
 const PORT = process.env.PORT || 3000;
@@ -25,9 +25,54 @@ client.commands = new Collection();
 const commandsPath = path.join(__dirname, 'src/commands');
 const eventPath = path.join(__dirname, 'src/events');
 
-// Self-ping function to keep Render service alive
+// Bank auto-update function
+async function updateBankMessage() {
+    try {
+        const bankChannelId = process.env.BANK_CHANNEL_ID;
+        if (!bankChannelId) return;
+
+        const bankChannel = client.channels.cache.get(bankChannelId);
+        if (!bankChannel) return;
+
+        const bankData = await github.getBankData();
+        const balance = bankData.balance || 10000000;
+
+        const embed = new EmbedBuilder()
+            .setColor(0x00FF00)
+            .setTitle('Firekid Project Server Trust Fund')
+            .setDescription(`Balance: **${balance.toLocaleString()}** coins`)
+            .setFooter({ text: 'funded by firekid' })
+            .setTimestamp();
+
+        // Try to find and update existing message, or send new one
+        try {
+            const messages = await bankChannel.messages.fetch({ limit: 10 });
+            const bankMessage = messages.find(msg => 
+                msg.author.id === client.user.id && 
+                msg.embeds.length > 0 && 
+                msg.embeds[0].title === 'Firekid Project Server Trust Fund'
+            );
+
+            if (bankMessage) {
+                await bankMessage.edit({ embeds: [embed] });
+            } else {
+                await bankChannel.send({ embeds: [embed] });
+            }
+        } catch (error) {
+            console.error('Error updating bank message:', error);
+        }
+    } catch (error) {
+        console.error('Error in updateBankMessage:', error);
+    }
+}
+
+// Improved self-ping function
 const startSelfPing = () => {
-    const RENDER_URL = process.env.RENDER_EXTERNAL_URL || `https://your-app-name.onrender.com:${PORT}`;
+    const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
+    if (!RENDER_URL) {
+        console.log('No RENDER_EXTERNAL_URL found, skipping self-ping');
+        return;
+    }
     
     const ping = () => {
         const url = new URL(RENDER_URL);
@@ -36,39 +81,38 @@ const startSelfPing = () => {
             port: url.port || (url.protocol === 'https:' ? 443 : 80),
             path: url.pathname || '/',
             method: 'GET',
-            timeout: 30000
+            timeout: 10000 // Reduced timeout to 10 seconds
         };
 
         const requestModule = url.protocol === 'https:' ? https : http;
         
         const req = requestModule.request(options, (res) => {
-            console.log(`🏓 Self-ping successful: ${res.statusCode} - ${new Date().toLocaleTimeString()}`);
+            // Only log once every hour to reduce spam
+            const now = new Date();
+            if (now.getMinutes() === 0) {
+                console.log(`Self-ping successful at ${now.toLocaleTimeString()}`);
+            }
         });
 
-        req.on('error', (err) => {
-            console.log(`⚠️  Self-ping failed: ${err.message} - ${new Date().toLocaleTimeString()}`);
+        req.on('error', () => {
+            // Silently fail, no need to spam logs
         });
 
         req.on('timeout', () => {
-            console.log(`⏰ Self-ping timeout - ${new Date().toLocaleTimeString()}`);
             req.destroy();
         });
 
         req.end();
     };
 
-    // Initial ping after 1 minute
+    // Start pinging after 1 minute, then every 10 minutes
     setTimeout(() => {
-        console.log('🚀 Starting self-ping service...');
-        console.log(`🌐 Pinging URL: ${RENDER_URL}`);
         ping();
-        
-        // Then ping every 10 minutes (600,000 ms)
         setInterval(ping, 10 * 60 * 1000);
     }, 60 * 1000);
 };
 
-// Simple HTTP server to respond to health checks
+// Simple HTTP server
 const startHealthServer = () => {
     const server = http.createServer((req, res) => {
         if (req.url === '/' || req.url === '/health') {
@@ -77,61 +121,34 @@ const startHealthServer = () => {
                 status: 'ok',
                 timestamp: new Date().toISOString(),
                 uptime: process.uptime(),
-                bot: client.user ? `${client.user.tag} (${client.user.id})` : 'Not logged in',
-                guilds: client.guilds ? client.guilds.cache.size : 0
+                bot: client.user ? `${client.user.tag}` : 'Not logged in'
             }));
         } else {
-            res.writeHead(404, { 'Content-Type': 'text/plain' });
+            res.writeHead(404);
             res.end('Not Found');
         }
     });
 
     server.listen(PORT, () => {
-        console.log(`🌐 Health server listening on port ${PORT}`);
+        console.log(`Health server listening on port ${PORT}`);
     });
-
-    return server;
 };
 
 // Initialize the bot
 async function initialize() {
-    console.log('Starting initialization...');
-    
     try {
-        // Test GitHub permissions first
-        console.log('\nTesting GitHub permissions...');
         const permissionsOk = await github.testPermissions();
         if (!permissionsOk) {
-            console.error('\nGitHub setup instructions:');
-            console.error('1. Go to https://github.com/settings/tokens');
-            console.error('2. Click "Generate new token (classic)"');
-            console.error('3. Select "repo" scope');
-            console.error('4. Copy token and update GITHUB_TOKEN in .env');
+            console.error('GitHub setup required - check your token permissions');
             process.exit(1);
         }
-        console.log('✓ GitHub permissions verified!\n');
         
-        // Initialize database
-        console.log('Initializing database...');
-        
-        // Simply test if database module is accessible
         if (database && typeof database === 'object') {
-            console.log('✓ Database module loaded successfully');
-            
-            // If your database has specific initialization requirements,
-            // add them here. For now, just verify it's loaded.
-            if (database.octokit) {
-                console.log('✓ Database has octokit instance');
-            }
-            if (database.owner && database.repo) {
-                console.log(`✓ Database configured for ${database.owner}/${database.repo}`);
-            }
+            console.log('Database module loaded');
         } else {
-            console.error('Database module not properly loaded!');
+            console.error('Database module not loaded');
             process.exit(1);
         }
-        
-        console.log('Database initialization successful!');
         
     } catch (error) {
         console.error('Initialization failed:', error);
@@ -140,7 +157,6 @@ async function initialize() {
 }
 
 // Load commands
-console.log('Loading commands...');
 const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
 const commands = [];
 
@@ -149,53 +165,38 @@ for (const file of commandFiles) {
         const command = require(path.join(commandsPath, file));
         client.commands.set(command.data.name, command);
         commands.push(command.data.toJSON());
-        console.log(`Loaded command: ${command.data.name}`);
+        console.log(`Loaded: ${command.data.name}`);
     } catch (error) {
-        console.error(`Error loading command ${file}:`, error);
+        console.error(`Error loading ${file}:`, error.message);
     }
 }
 
-// Auto-register slash commands
+// Register commands
 async function registerCommands() {
     const clientId = process.env.CLIENT_ID || process.env.DISCORD_CLIENT_ID;
     
     if (!process.env.DISCORD_TOKEN || !clientId) {
-        console.error('Missing DISCORD_TOKEN or CLIENT_ID/DISCORD_CLIENT_ID in .env file');
-        console.error('Your CLIENT_ID should be: DISCORD_CLIENT_ID=1408214555418427393 (already set)');
+        console.error('Missing DISCORD_TOKEN or CLIENT_ID');
         return false;
     }
 
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
 
     try {
-        console.log(`\nRegistering ${commands.length} slash commands...`);
-        
-        // Register commands globally
         await rest.put(
             Routes.applicationCommands(clientId),
             { body: commands }
         );
         
-        console.log('✓ Successfully registered global slash commands!');
+        console.log(`Registered ${commands.length} slash commands`);
         return true;
     } catch (error) {
-        console.error('Failed to register slash commands:', error);
-        
-        // Provide helpful error messages
-        if (error.code === 50001) {
-            console.error('Bot is missing access. Make sure the bot is invited with the applications.commands scope.');
-        } else if (error.code === 10002) {
-            console.error('Invalid CLIENT_ID. Check your CLIENT_ID in the .env file.');
-        } else if (error.status === 401) {
-            console.error('Invalid DISCORD_TOKEN. Check your token in the .env file.');
-        }
-        
+        console.error('Failed to register commands:', error.message);
         return false;
     }
 }
 
 // Load events
-console.log('Loading events...');
 const eventFiles = fs.readdirSync(eventPath).filter(file => file.endsWith('.js'));
 for (const file of eventFiles) {
     try {
@@ -205,9 +206,8 @@ for (const file of eventFiles) {
         } else {
             client.on(event.name, (...args) => event.execute(...args, client));
         }
-        console.log(`Loaded event: ${event.name}`);
     } catch (error) {
-        console.error(`Error loading event ${file}:`, error);
+        console.error(`Error loading event ${file}:`, error.message);
     }
 }
 
@@ -219,14 +219,9 @@ client.on('interactionCreate', async interaction => {
     if (!command) return;
 
     try {
-        console.log(`Executing command: ${interaction.commandName} by ${interaction.user.tag} in ${interaction.guild?.name || 'DM'}`);
-        
-        // All commands now use the new single-parameter system
         await command.execute(interaction);
-        
-        console.log(`Command executed successfully: ${interaction.commandName}`);
     } catch (error) {
-        console.error(`Error executing command ${interaction.commandName}:`, error);
+        console.error(`Command ${interaction.commandName} error:`, error.message);
         const errorMessage = {
             content: 'There was an error executing this command!',
             ephemeral: true
@@ -241,52 +236,32 @@ client.on('interactionCreate', async interaction => {
 
 // Bot ready event
 client.once('ready', async () => {
-    console.log('Bot logged in successfully!');
     console.log(`Ready! Logged in as ${client.user.tag}`);
     console.log(`Serving ${client.guilds.cache.size} guilds`);
-    console.log(`Loaded ${client.commands.size} commands`);
     
-    // Auto-register commands on startup
-    console.log('\nChecking slash command registration...');
-    const registered = await registerCommands();
-    if (!registered) {
-        console.log('⚠️  Command registration failed, but bot will continue running');
-        console.log('Commands may not work properly until registration succeeds');
-    }
+    await registerCommands();
     
-    // Set bot status
     client.user.setActivity('slash commands', { type: 'LISTENING' });
     
-    // Start health server
     startHealthServer();
-    
-    // Start self-ping to keep Render service alive
     startSelfPing();
+    
+    // Start bank auto-update every 6 hours
+    updateBankMessage(); // Initial update
+    setInterval(updateBankMessage, 6 * 60 * 60 * 1000); // Every 6 hours
 });
 
 // Error handling
 client.on('error', error => {
-    console.error('Discord client error:', error);
+    console.error('Discord error:', error.message);
 });
 
 process.on('unhandledRejection', error => {
-    console.error('Unhandled promise rejection:', error);
+    console.error('Promise rejection:', error.message);
 });
 
-process.on('uncaughtException', error => {
-    console.error('Uncaught exception:', error);
-    process.exit(1);
-});
-
-// Graceful shutdown
 process.on('SIGINT', () => {
-    console.log('Received SIGINT, shutting down gracefully...');
-    client.destroy();
-    process.exit(0);
-});
-
-process.on('SIGTERM', () => {
-    console.log('Received SIGTERM, shutting down gracefully...');
+    console.log('Shutting down...');
     client.destroy();
     process.exit(0);
 });
@@ -298,6 +273,6 @@ async function start() {
 }
 
 start().catch(error => {
-    console.error('Failed to start bot:', error);
+    console.error('Failed to start:', error);
     process.exit(1);
 });
