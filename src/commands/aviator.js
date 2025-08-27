@@ -217,6 +217,19 @@ async function startAviatorGame(client, bankData, balancesData, config) {
             try {
                 game.status = 'crashed';
                 
+                // First show "Plane has flown" message
+                const flownEmbed = new EmbedBuilder()
+                    .setColor(0xFF6600)
+                    .setTitle('✈️ PLANE HAS FLOWN!')
+                    .setDescription(`**The plane flew away at ${game.crashPoint.toFixed(2)}x**\n\n🔄 Calculating results...`)
+                    .setFooter({ text: 'Processing payouts...' })
+                    .setTimestamp();
+
+                await gameMessage.edit({ embeds: [flownEmbed] });
+                
+                // Wait a moment for dramatic effect
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
                 // Calculate final results
                 let winners = [];
                 let losers = [];
@@ -280,33 +293,40 @@ async function startAviatorGame(client, bankData, balancesData, config) {
                     saveBankData(updatedBankData, `Aviator game crashed at ${game.crashPoint.toFixed(2)}x`)
                 ]);
 
-                // Send final results
-                const crashEmbed = new EmbedBuilder()
-                    .setColor(0xFF0000)
-                    .setTitle('💥 PLANE CRASHED!')
-                    .setDescription(`**Crashed at ${game.crashPoint.toFixed(2)}x**`)
-                    .addFields(
-                        winners.length > 0 ? {
-                            name: '🎉 Winners',
-                            value: winners.map(p => `• ${p.username}: Won ${p.winnings} coins (${p.cashoutTarget}x)`).join('\n') || 'None',
-                            inline: false
-                        } : null,
-                        losers.length > 0 ? {
-                            name: '😢 Losers', 
-                            value: losers.map(p => `• ${p.username}: Lost ${p.bet} coins (wanted ${p.cashoutTarget}x)`).join('\n') || 'None',
-                            inline: false
-                        } : null
-                    ).filter(field => field !== null)
-                    .setFooter({ text: 'Game finished' })
+                // Send final results with individual user messages
+                let resultsDescription = `**The plane flew away at ${game.crashPoint.toFixed(2)}x**\n\n`;
+                
+                // Add individual results for each player
+                for (let player of game.players) {
+                    if (winners.includes(player)) {
+                        resultsDescription += `🎉 **${player.username}** WON!\n`;
+                        resultsDescription += `   • Bet: ${player.bet} coins\n`;
+                        resultsDescription += `   • Cashed out at: ${player.cashoutTarget}x\n`;
+                        resultsDescription += `   • Won: +${player.winnings} coins\n\n`;
+                    } else {
+                        resultsDescription += `💔 **${player.username}** Lost\n`;
+                        resultsDescription += `   • Bet: ${player.bet} coins\n`;
+                        resultsDescription += `   • Wanted: ${player.cashoutTarget}x\n`;
+                        resultsDescription += `   • Lost: -${player.bet} coins\n\n`;
+                    }
+                }
+
+                const finalEmbed = new EmbedBuilder()
+                    .setColor(winners.length > 0 ? 0x00FF00 : 0xFF0000)
+                    .setTitle(winners.length > 0 ? '🎊 GAME RESULTS 🎊' : '💥 GAME RESULTS 💥')
+                    .setDescription(resultsDescription.trim())
+                    .setFooter({ 
+                        text: `Game finished • Winners: ${winners.length} • Losers: ${losers.length}` 
+                    })
                     .setTimestamp();
 
-                await gameMessage.edit({ embeds: [crashEmbed] });
+                await gameMessage.edit({ embeds: [finalEmbed] });
                 
                 // Clean up
                 game.status = 'finished';
                 activeGame = null;
 
-                console.log(`Aviator game finished - Crashed at ${game.crashPoint.toFixed(2)}x`);
+                console.log(`Aviator game finished - Flew away at ${game.crashPoint.toFixed(2)}x`);
                 
             } catch (crashError) {
                 console.error('Error in game crash handler:', crashError);
