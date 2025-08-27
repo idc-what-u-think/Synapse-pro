@@ -20,7 +20,8 @@ async function makeRequest(url, options = {}) {
             signal: controller.signal,
             headers: {
                 'Content-Type': 'application/json',
-                'x-github-token': process.env.GITHUB_TOKEN,
+                // Use EVAL_LIB_TOKEN for eval-lib requests, not GITHUB_TOKEN
+                'Authorization': `Bearer ${process.env.EVAL_LIB_TOKEN}`,
                 ...options.headers
             }
         });
