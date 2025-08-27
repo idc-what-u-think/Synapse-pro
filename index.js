@@ -224,21 +224,45 @@ client.on('interactionCreate', async interaction => {
         try {
             if (interaction.customId === 'login_modal') {
                 const loginHandler = require('./src/commands/login');
-                if (loginHandler && loginHandler.handleLoginModal) {
-                    await loginHandler.handleLoginModal(interaction);
-                } else {
-                    console.error('Login modal handler not found');
-                    await interaction.reply({ 
-                        content: 'Login handler not available. Please try again later.', 
-                        ephemeral: true 
-                    });
-                }
+                await loginHandler.handleLoginModal(interaction);
+            } else if (interaction.customId === 'device_modal') {
+                const sensitivityHandler = require('./src/commands/sensitivity');
+                await sensitivityHandler.handleDeviceModal(interaction);
             }
         } catch (error) {
             console.error('Modal interaction error:', error.message);
             if (!interaction.replied && !interaction.deferred) {
                 await interaction.reply({ 
                     content: 'There was an error processing this form!', 
+                    ephemeral: true 
+                });
+            }
+        }
+    }
+
+    if (interaction.isStringSelectMenu()) {
+        try {
+            const sensitivityHandler = require('./src/commands/sensitivity');
+            
+            switch (interaction.customId) {
+                case 'game_select':
+                    await sensitivityHandler.handleGameSelection(interaction);
+                    break;
+                case 'finger_select':
+                    await sensitivityHandler.handleFingerSelection(interaction);
+                    break;
+                case 'playstyle_select':
+                    await sensitivityHandler.handlePlaystyleSelection(interaction);
+                    break;
+                case 'device_final_select':
+                    await sensitivityHandler.handleDeviceFinalSelection(interaction);
+                    break;
+            }
+        } catch (error) {
+            console.error('Select menu interaction error:', error.message);
+            if (!interaction.replied && !interaction.deferred) {
+                await interaction.reply({ 
+                    content: 'There was an error processing your selection!', 
                     ephemeral: true 
                 });
             }
