@@ -8,7 +8,6 @@ const http = require('http');
 const database = require('./src/utils/database');
 const github = require('./src/utils/github');
 
-// Port configuration
 const PORT = process.env.PORT || 3000;
 
 const client = new Client({
@@ -25,7 +24,6 @@ client.commands = new Collection();
 const commandsPath = path.join(__dirname, 'src/commands');
 const eventPath = path.join(__dirname, 'src/events');
 
-// Bank auto-update function
 async function updateBankMessage() {
     try {
         const bankChannelId = process.env.BANK_CHANNEL_ID;
@@ -44,7 +42,6 @@ async function updateBankMessage() {
             .setFooter({ text: 'funded by firekid' })
             .setTimestamp();
 
-        // Try to find and update existing message, or send new one
         try {
             const messages = await bankChannel.messages.fetch({ limit: 10 });
             const bankMessage = messages.find(msg => 
@@ -66,7 +63,6 @@ async function updateBankMessage() {
     }
 }
 
-// Improved self-ping function
 const startSelfPing = () => {
     const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
     if (!RENDER_URL) {
@@ -81,13 +77,12 @@ const startSelfPing = () => {
             port: url.port || (url.protocol === 'https:' ? 443 : 80),
             path: url.pathname || '/',
             method: 'GET',
-            timeout: 10000 // Reduced timeout to 10 seconds
+            timeout: 10000
         };
 
         const requestModule = url.protocol === 'https:' ? https : http;
         
         const req = requestModule.request(options, (res) => {
-            // Only log once every hour to reduce spam
             const now = new Date();
             if (now.getMinutes() === 0) {
                 console.log(`Self-ping successful at ${now.toLocaleTimeString()}`);
@@ -95,7 +90,6 @@ const startSelfPing = () => {
         });
 
         req.on('error', () => {
-            // Silently fail, no need to spam logs
         });
 
         req.on('timeout', () => {
@@ -105,14 +99,12 @@ const startSelfPing = () => {
         req.end();
     };
 
-    // Start pinging after 1 minute, then every 10 minutes
     setTimeout(() => {
         ping();
         setInterval(ping, 10 * 60 * 1000);
     }, 60 * 1000);
 };
 
-// Simple HTTP server
 const startHealthServer = () => {
     const server = http.createServer((req, res) => {
         if (req.url === '/' || req.url === '/health') {
@@ -134,7 +126,6 @@ const startHealthServer = () => {
     });
 };
 
-// Initialize the bot
 async function initialize() {
     try {
         const permissionsOk = await github.testPermissions();
@@ -156,7 +147,6 @@ async function initialize() {
     }
 }
 
-// Load commands
 const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
 const commands = [];
 
@@ -171,7 +161,6 @@ for (const file of commandFiles) {
     }
 }
 
-// Register commands
 async function registerCommands() {
     const clientId = process.env.CLIENT_ID || process.env.DISCORD_CLIENT_ID;
     
@@ -196,7 +185,6 @@ async function registerCommands() {
     }
 }
 
-// Load events
 const eventFiles = fs.readdirSync(eventPath).filter(file => file.endsWith('.js'));
 for (const file of eventFiles) {
     try {
@@ -211,30 +199,53 @@ for (const file of eventFiles) {
     }
 }
 
-// Handle interactions
 client.on('interactionCreate', async interaction => {
-    if (!interaction.isCommand()) return;
+    if (interaction.isChatInputCommand()) {
+        const command = client.commands.get(interaction.commandName);
+        if (!command) return;
 
-    const command = client.commands.get(interaction.commandName);
-    if (!command) return;
-
-    try {
-        await command.execute(interaction);
-    } catch (error) {
-        console.error(`Command ${interaction.commandName} error:`, error.message);
-        const errorMessage = {
-            content: 'There was an error executing this command!',
-            ephemeral: true
-        };
-        if (interaction.replied || interaction.deferred) {
-            await interaction.followUp(errorMessage);
-        } else {
-            await interaction.reply(errorMessage);
+        try {
+            await command.execute(interaction);
+        } catch (error) {
+            console.error(`Command ${interaction.commandName} error:`, error.message);
+            const errorMessage = {
+                content: 'There was an error executing this command!',
+                ephemeral: true
+            };
+            if (interaction.replied || interaction.deferred) {
+                await interaction.followUp(errorMessage);
+            } else {
+                await interaction.reply(errorMessage);
+            }
+        }
+    }
+    
+    if (interaction.isModalSubmit()) {
+        try {
+            if (interaction.customId === 'login_modal') {
+                const loginHandler = require('./src/commands/login');
+                if (loginHandler && loginHandler.handleLoginModal) {
+                    await loginHandler.handleLoginModal(interaction);
+                } else {
+                    console.error('Login modal handler not found');
+                    await interaction.reply({ 
+                        content: 'Login handler not available. Please try again later.', 
+                        ephemeral: true 
+                    });
+                }
+            }
+        } catch (error) {
+            console.error('Modal interaction error:', error.message);
+            if (!interaction.replied && !interaction.deferred) {
+                await interaction.reply({ 
+                    content: 'There was an error processing this form!', 
+                    ephemeral: true 
+                });
+            }
         }
     }
 });
 
-// Bot ready event
 client.once('ready', async () => {
     console.log(`Ready! Logged in as ${client.user.tag}`);
     console.log(`Serving ${client.guilds.cache.size} guilds`);
@@ -246,12 +257,10 @@ client.once('ready', async () => {
     startHealthServer();
     startSelfPing();
     
-    // Start bank auto-update every 6 hours
-    updateBankMessage(); // Initial update
-    setInterval(updateBankMessage, 6 * 60 * 60 * 1000); // Every 6 hours
+    updateBankMessage();
+    setInterval(updateBankMessage, 6 * 60 * 60 * 1000);
 });
 
-// Error handling
 client.on('error', error => {
     console.error('Discord error:', error.message);
 });
@@ -266,7 +275,6 @@ process.on('SIGINT', () => {
     process.exit(0);
 });
 
-// Start the bot
 async function start() {
     await initialize();
     await client.login(process.env.DISCORD_TOKEN);
