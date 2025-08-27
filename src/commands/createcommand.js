@@ -1,6 +1,5 @@
 const { SlashCommandBuilder, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, EmbedBuilder } = require('discord.js');
 const { getData, saveData } = require('../utils/github');
-const axios = require('axios');
 
 const EVAL_LIB_URL = process.env.EVAL_LIB_URL || 'http://localhost:3000';
 const MODAL_TIMEOUT = 300000; // 5 minutes
@@ -9,6 +8,38 @@ const REQUEST_TIMEOUT = 10000; // 10 seconds
 // Template cache to reduce API calls
 const templateCache = new Map();
 const CACHE_DURATION = 300000; // 5 minutes
+
+// HTTP request helper using built-in fetch (Node 18+)
+async function makeRequest(url, options = {}) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+    
+    try {
+        const response = await fetch(url, {
+            ...options,
+            signal: controller.signal,
+            headers: {
+                'Content-Type': 'application/json',
+                'x-github-token': process.env.GITHUB_TOKEN,
+                ...options.headers
+            }
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        return await response.json();
+    } catch (error) {
+        clearTimeout(timeoutId);
+        if (error.name === 'AbortError') {
+            throw new Error('Request timeout');
+        }
+        throw error;
+    }
+}
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -132,14 +163,10 @@ module.exports = {
                 await submission.deferReply({ ephemeral: true });
 
                 // Generate command using eval-lib with timeout
-                const { data: result } = await axios.post(
-                    `${EVAL_LIB_URL}/api/commands/create`, 
-                    formData,
-                    {
-                        headers: { 'x-github-token': process.env.GITHUB_TOKEN },
-                        timeout: REQUEST_TIMEOUT
-                    }
-                );
+                const result = await makeRequest(`${EVAL_LIB_URL}/api/commands/create`, {
+                    method: 'POST',
+                    body: JSON.stringify(formData)
+                });
 
                 if (!result.success) {
                     throw new Error(result.error || 'Failed to generate command');
@@ -248,13 +275,7 @@ async function getTemplatesWithCache(commandType) {
         return cached.data;
     }
 
-    const { data: templates } = await axios.get(
-        `${EVAL_LIB_URL}/api/templates/${commandType}`,
-        {
-            headers: { 'x-github-token': process.env.GITHUB_TOKEN },
-            timeout: REQUEST_TIMEOUT
-        }
-    );
+    const templates = await makeRequest(`${EVAL_LIB_URL}/api/templates/${commandType}`);
 
     templateCache.set(cacheKey, {
         data: templates,
@@ -346,19 +367,19 @@ function isValidCommandCode(code) {
 }
 
 function getErrorMessage(error) {
-    if (error.code === 'ECONNREFUSED') {
-        return 'Service temporarily unavailable. Please try again later.';
-    }
-    if (error.code === 'TIMEOUT') {
+    if (error.message === 'Request timeout') {
         return 'Request timed out. Please try again.';
     }
-    if (error.response?.status === 401) {
+    if (error.message.includes('HTTP 401')) {
         return 'Authentication failed. Please contact an administrator.';
     }
-    if (error.response?.status >= 500) {
+    if (error.message.includes('HTTP 5')) {
         return 'Server error. Please try again later.';
     }
-    return error.response?.data?.error || error.message || 'Unknown error occurred.';
+    if (error.message.includes('Failed to fetch')) {
+        return 'Service temporarily unavailable. Please try again later.';
+    }
+    return error.message || 'Unknown error occurred.';
 }
 
 function getPlaceholderForType(type) {
