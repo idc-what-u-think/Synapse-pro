@@ -1,4 +1,26 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+// Update message every 3 seconds for Discord rate limits
+            if (currentTime - lastUpdateTime >= 3000) {
+                lastUpdateTime = currentTime;
+                
+                const liveEmbed = new EmbedBuilder()
+                    .setColor(0x00FF00)
+                    .setTitle('✈️ Aviator Flying!')
+                    .setDescription(`**${currentMultiplier.toFixed(2)}x**\n\n${game.players.map(p => {
+                        if (p.cashoutTarget <= currentMultiplier) {
+                            return `• ✅ ${p.username}: Cashed out at ${p.cashoutTarget}x!`;
+                        } else {
+                            return `• 🎯 ${p.username}: Target ${p.cashoutTarget}x`;
+                        }
+                    }).join('\n')}`)
+                    .setFooter({ text: `Plane climbing... Current: ${currentMultiplier.toFixed(2)}x` })
+                    .setTimestamp();
+
+                try {
+                    await gameMessage.edit({ embeds: [liveEmbed] });
+                } catch (editError) {
+                    console.log('Rate limited or edit error:', editError.message);
+                }
+            }const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { getConfig, getBalances, saveBalances, getBankData, saveBankData } = require('../utils/github');
 
 // Global game state
@@ -94,11 +116,18 @@ module.exports = {
                 });
             }
 
-            // Check if there's already an active game
+            // Check if there's already an active game (with timeout check)
             if (activeGame && activeGame.status !== 'finished') {
-                return await interaction.editReply({
-                    content: '✈️ There\'s already an Aviator game in progress! Wait for it to finish.'
-                });
+                // Check if the game has been running too long (more than 5 minutes = stuck)
+                const gameAge = Date.now() - activeGame.startTime;
+                if (gameAge > 300000) { // 5 minutes
+                    console.log('Clearing stuck aviator game');
+                    activeGame = null;
+                } else {
+                    return await interaction.editReply({
+                        content: '✈️ There\'s already an Aviator game in progress! Wait for it to finish.'
+                    });
+                }
             }
 
             // Check bank balance for potential winnings
@@ -187,10 +216,19 @@ async function startAviatorGame(client, bankData, balancesData, config) {
 
         const gameMessage = await gameChannel.send({ embeds: [initialEmbed] });
 
-        // Game loop - update multiplier in real time
+        // Game loop - update multiplier in real time with safety timeout
+        const maxGameDuration = 120000; // 2 minutes max game time
         const gameInterval = setInterval(async () => {
             const currentTime = Date.now();
             const elapsedTime = (currentTime - startTime) / 1000; // seconds
+            
+            // Safety check: Force crash if game runs too long
+            if (currentTime - startTime > maxGameDuration) {
+                console.log('Force ending Aviator game - exceeded max duration');
+                clearInterval(gameInterval);
+                game.crashPoint = Math.max(currentMultiplier, 1.01); // Force crash at current or minimum
+                // Continue to crash logic below
+            }
             
             // Calculate current multiplier based on time (exponential growth)
             currentMultiplier = 1.00 + (Math.pow(1.08, elapsedTime) - 1) * 0.3;
@@ -199,7 +237,56 @@ async function startAviatorGame(client, bankData, balancesData, config) {
             if (currentMultiplier >= game.crashPoint) {
                 clearInterval(gameInterval);
                 
-                // Game crashed
+                // Game crashed - cleanup and results logic
+                await handleGameCrash();
+                return;
+            }
+
+            // Update message every 3 seconds for Discord rate limits
+            if (currentTime - lastUpdateTime >= 3000) {
+                lastUpdateTime = currentTime;
+                
+                try {
+                    await updateGameMessage();
+                } catch (updateError) {
+                    console.log('Error updating game message:', updateError.message);
+                    // Don't crash the game for message update errors
+                }
+            }
+
+        }, 500); // Check every 500ms but only update Discord every 3 seconds
+
+        // Safety timeout to force cleanup if something goes wrong
+        setTimeout(() => {
+            if (activeGame && activeGame.status === 'flying') {
+                console.log('Safety timeout: Force clearing stuck Aviator game');
+                clearInterval(gameInterval);
+                activeGame.status = 'finished';
+                activeGame = null;
+            }
+        }, maxGameDuration + 10000); // 10 seconds after max game duration
+
+        // Helper function to update the game message
+        async function updateGameMessage() {
+            const liveEmbed = new EmbedBuilder()
+                .setColor(0x00FF00)
+                .setTitle('✈️ Aviator Flying!')
+                .setDescription(`**${currentMultiplier.toFixed(2)}x**\n\n${game.players.map(p => {
+                    if (p.cashoutTarget <= currentMultiplier) {
+                        return `• ✅ ${p.username}: Cashed out at ${p.cashoutTarget}x!`;
+                    } else {
+                        return `• 🎯 ${p.username}: Target ${p.cashoutTarget}x`;
+                    }
+                }).join('\n')}`)
+                .setFooter({ text: `Plane climbing... Current: ${currentMultiplier.toFixed(2)}x` })
+                .setTimestamp();
+
+            await gameMessage.edit({ embeds: [liveEmbed] });
+        }
+
+        // Helper function to handle game crash
+        async function handleGameCrash() {
+            try {
                 game.status = 'crashed';
                 
                 // Calculate final results
@@ -286,10 +373,20 @@ async function startAviatorGame(client, bankData, balancesData, config) {
                     .setTimestamp();
 
                 await gameMessage.edit({ embeds: [crashEmbed] });
+                
+                // Clean up
                 game.status = 'finished';
+                activeGame = null;
 
                 console.log(`Aviator game finished - Crashed at ${game.crashPoint.toFixed(2)}x`);
-                return;
+                
+            } catch (crashError) {
+                console.error('Error in game crash handler:', crashError);
+                // Force cleanup even if crash handling fails
+                game.status = 'finished';
+                activeGame = null;
+            }
+        }
             }
 
             // Update message every 3 seconds for Discord rate limits
@@ -320,8 +417,10 @@ async function startAviatorGame(client, bankData, balancesData, config) {
 
     } catch (error) {
         console.error('Error running Aviator game:', error);
+        // Always clear the active game on error to prevent getting stuck
         if (activeGame) {
             activeGame.status = 'finished';
+            activeGame = null;
         }
     }
 }
