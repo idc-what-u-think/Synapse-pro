@@ -14,6 +14,11 @@ async function makeRequest(url, options = {}) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
     
+    // Add debugging
+    console.log(`Making request to: ${url}`);
+    console.log(`EVAL_LIB_URL: ${process.env.EVAL_LIB_URL}`);
+    console.log(`EVAL_LIB_TOKEN exists: ${!!process.env.EVAL_LIB_TOKEN}`);
+    
     try {
         const response = await fetch(url, {
             ...options,
@@ -28,13 +33,18 @@ async function makeRequest(url, options = {}) {
         
         clearTimeout(timeoutId);
         
+        console.log(`Response status: ${response.status} ${response.statusText}`);
+        
         if (!response.ok) {
+            const errorText = await response.text().catch(() => 'No error details');
+            console.error(`Response error: ${errorText}`);
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
         
         return await response.json();
     } catch (error) {
         clearTimeout(timeoutId);
+        console.error('Request error:', error.message);
         if (error.name === 'AbortError') {
             throw new Error('Request timeout');
         }
@@ -60,6 +70,21 @@ module.exports = {
 
     async execute(interaction) {
         try {
+            // Check if required environment variables are set
+            if (!process.env.EVAL_LIB_URL) {
+                return await interaction.reply({
+                    content: '❌ EVAL_LIB_URL environment variable not set.',
+                    ephemeral: true
+                });
+            }
+            
+            if (!process.env.EVAL_LIB_TOKEN) {
+                return await interaction.reply({
+                    content: '❌ EVAL_LIB_TOKEN environment variable not set.',
+                    ephemeral: true
+                });
+            }
+
             const commandType = interaction.options.getString('type');
             
             // Check user permissions for command creation
@@ -70,17 +95,8 @@ module.exports = {
                 });
             }
 
-            // Fetch templates with caching
-            let templates;
-            try {
-                templates = await getTemplatesWithCache(commandType);
-            } catch (error) {
-                console.error('Template fetch error:', error);
-                return await interaction.reply({
-                    content: '❌ Failed to fetch command templates. Please try again later.',
-                    ephemeral: true
-                });
-            }
+            // Skip template fetching for now - we'll send the data directly to create endpoint
+            console.log(`Creating ${commandType} command...`);
 
             // Create modal for command creation
             const modal = new ModalBuilder()
@@ -164,10 +180,13 @@ module.exports = {
                 await submission.deferReply({ ephemeral: true });
 
                 // Generate command using eval-lib with timeout
+                console.log('Sending data to eval-lib:', JSON.stringify(formData, null, 2));
                 const result = await makeRequest(`${EVAL_LIB_URL}/api/commands/create`, {
                     method: 'POST',
                     body: JSON.stringify(formData)
                 });
+
+                console.log('Eval-lib response:', result);
 
                 if (!result.success) {
                     throw new Error(result.error || 'Failed to generate command');
