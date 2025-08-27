@@ -292,8 +292,8 @@ async function startAviatorGame(client, bankData, balancesData, config) {
                 return;
             }
 
-            // Update message every 200ms for smooth animation
-            if (currentTime - lastUpdateTime >= 200) {
+            // Update message every 3 seconds for Discord rate limits
+            if (currentTime - lastUpdateTime >= 3000) {
                 lastUpdateTime = currentTime;
                 
                 const liveEmbed = new EmbedBuilder()
@@ -312,11 +312,11 @@ async function startAviatorGame(client, bankData, balancesData, config) {
                 try {
                     await gameMessage.edit({ embeds: [liveEmbed] });
                 } catch (editError) {
-                    // Ignore edit errors (rate limiting, etc.)
+                    console.log('Rate limited or edit error:', editError.message);
                 }
             }
 
-        }, 100); // Update every 100ms for smooth animation
+        }, 500); // Check every 500ms but only update Discord every 3 seconds
 
     } catch (error) {
         console.error('Error running Aviator game:', error);
