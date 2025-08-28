@@ -1,7 +1,6 @@
 const { SlashCommandBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ActionRowBuilder, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const { WebsiteAPI } = require('../utils/websiteAPI');
 const github = require('../utils/github');
-const axios = require('axios'); 
 
 const websiteAPI = new WebsiteAPI();
 
@@ -240,6 +239,7 @@ module.exports = {
                 return;
             }
 
+            // Your API returns devices with nested structure: { name, info }
             const matchingDevices = searchResult.data.devices.map(d => d.name);
 
             if (matchingDevices.length === 0) {
@@ -306,7 +306,7 @@ module.exports = {
                 return;
             }
 
-            // Prepare API request
+            // Prepare API request parameters
             const sensitivityParams = {
                 username: userCredentials.username,
                 password: userCredentials.password || '',
@@ -316,21 +316,17 @@ module.exports = {
                 ...(userData.selectedFingers && { fingers: userData.selectedFingers })
             };
 
-            // Call your API endpoint directly (update with your actual domain)
-            const apiResponse = await axios.post(`${process.env.API_BASE_URL || 'http://localhost:3000'}/api/sensitivity`, sensitivityParams, {
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                timeout: 30000 // 30 second timeout
-            });
-            
-            if (!apiResponse.data.success) {
+            // Call the sensitivity calculation API
+            const result = await websiteAPI.calculateSensitivity(sensitivityParams);
+
+            if (!result.success) {
                 const reply = interaction.replied || interaction.deferred ? 'editReply' : 'reply';
-                await interaction[reply](`❌ ${apiResponse.data.error}`);
+                await interaction[reply](`❌ ${result.error}`);
                 return;
             }
 
-            const { sensitivity, user, game, device, playstyle, fingers } = apiResponse.data.data;
+            // Your API returns: { success: true, data: { sensitivity, user, game, device, playstyle, fingers } }
+            const { sensitivity, user, game, device, playstyle, fingers } = result.data;
             const isVip = user.role === 'vip' || user.role === 'admin';
             let embed;
 
