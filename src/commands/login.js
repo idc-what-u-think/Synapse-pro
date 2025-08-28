@@ -1,167 +1,77 @@
 const { SlashCommandBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
-const { createClient } = require('@supabase/supabase-js');
-const { getDiscordSessions, saveDiscordSessions } = require('../utils/github');
+const { WebsiteAPI } = require('../utils/websiteAPI');
+const github = require('../utils/github');
 
-const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-);
+const websiteAPI = new WebsiteAPI();
 
-async function refreshUserSession(discordId) {
-    try {
-        const sessions = await getDiscordSessions();
-        
-        if (!sessions[discordId]) {
-            return null;
-        }
-
-        const { data: user, error } = await supabase
-            .from('users')
-            .select('id, username, role, suspended_at, suspension_reason')
-            .eq('id', sessions[discordId].supabaseUserId)
-            .single();
-
-        if (error || !user) {
-            delete sessions[discordId];
-            await saveDiscordSessions(sessions, 'Remove invalid session');
-            return null;
-        }
-
-        if (user.suspended_at) {
-            delete sessions[discordId];
-            await saveDiscordSessions(sessions, 'Remove suspended user session');
-            return { suspended: true, reason: user.suspension_reason };
-        }
-
-        sessions[discordId] = {
-            ...sessions[discordId],
-            role: user.role,
-            subscriptionType: user.role,
-            lastUsed: new Date().toISOString()
-        };
-
-        await saveDiscordSessions(sessions, 'Refresh user session');
-        return sessions[discordId];
-    } catch (error) {
-        console.error('Error refreshing user session:', error);
-        return null;
-    }
-}
-
-const loginCommand = {
+module.exports = {
     data: new SlashCommandBuilder()
         .setName('login')
-        .setDescription('Link your Sensitivity Web account to Discord'),
-
+        .setDescription('Link your sensitivity website account'),
+    
     async execute(interaction) {
         const modal = new ModalBuilder()
             .setCustomId('login_modal')
-            .setTitle('Login to Sensitivity Web');
+            .setTitle('Login to Sensitivity Website');
 
         const usernameInput = new TextInputBuilder()
-            .setCustomId('username_input')
+            .setCustomId('username')
             .setLabel('Username')
             .setStyle(TextInputStyle.Short)
             .setRequired(true)
-            .setMaxLength(50)
-            .setPlaceholder('Enter your username');
+            .setMaxLength(50);
 
         const passwordInput = new TextInputBuilder()
-            .setCustomId('password_input')
+            .setCustomId('password')
             .setLabel('Password')
             .setStyle(TextInputStyle.Short)
             .setRequired(true)
-            .setMaxLength(100)
-            .setPlaceholder('Enter your password');
+            .setMaxLength(100);
 
-        const firstActionRow = new ActionRowBuilder().addComponents(usernameInput);
-        const secondActionRow = new ActionRowBuilder().addComponents(passwordInput);
+        const usernameRow = new ActionRowBuilder().addComponents(usernameInput);
+        const passwordRow = new ActionRowBuilder().addComponents(passwordInput);
 
-        modal.addComponents(firstActionRow, secondActionRow);
+        modal.addComponents(usernameRow, passwordRow);
 
         await interaction.showModal(modal);
-    }
-};
+    },
 
-async function handleLoginModal(interaction) {
-    await interaction.deferReply({ ephemeral: true });
+    async handleLoginModal(interaction) {
+        await interaction.deferReply({ ephemeral: true });
 
-    try {
-        const username = interaction.fields.getTextInputValue('username_input');
-        const password = interaction.fields.getTextInputValue('password_input');
-        const discordId = interaction.user.id;
-
-        const { data: user, error } = await supabase
-            .from('users')
-            .select('id, username, suspended_at, suspension_reason, password_hash, role')
-            .eq('username', username)
-            .eq('password_hash', password)
-            .single();
-
-        if (error || !user) {
-            await interaction.editReply('Authentication failed. Please check your credentials.');
-            
-            try {
-                const dmChannel = await interaction.user.createDM();
-                await dmChannel.send('**Sensitivity Web Linked failed**');
-            } catch (dmError) {
-                console.error('Failed to send DM:', dmError);
-            }
-            return;
-        }
-
-        if (user.suspended_at) {
-            await interaction.editReply(`Account is suspended. Reason: ${user.suspension_reason || 'No reason provided'}`);
-            
-            try {
-                const dmChannel = await interaction.user.createDM();
-                await dmChannel.send('**Sensitivity Web Linked failed**');
-            } catch (dmError) {
-                console.error('Failed to send DM:', dmError);
-            }
-            return;
-        }
-
-        const subscriptionType = user.role || 'basic';
-
-        const sessions = await getDiscordSessions();
-        sessions[discordId] = {
-            supabaseUserId: user.id,
-            username: user.username,
-            role: user.role,
-            subscriptionType: subscriptionType,
-            linkedAt: new Date().toISOString(),
-            lastUsed: new Date().toISOString()
-        };
-
-        await saveDiscordSessions(sessions, 'Link Discord account');
-
-        await interaction.editReply('Successfully linked your account! Check your DMs.');
+        const username = interaction.fields.getTextInputValue('username');
+        const password = interaction.fields.getTextInputValue('password');
+        const userId = interaction.user.id;
 
         try {
-            const dmChannel = await interaction.user.createDM();
-            await dmChannel.send('**Sensitivity Web Linked successfully**');
-        } catch (dmError) {
-            console.error('Failed to send success DM:', dmError);
-        }
+            const result = await websiteAPI.verifyUser(username, password);
 
-    } catch (error) {
-        console.error('Login error:', error);
-        await interaction.editReply('An error occurred during login. Please try again later.');
-        
-        try {
-            const dmChannel = await interaction.user.createDM();
-            await dmChannel.send('**Sensitivity Web Linked failed**');
-        } catch (dmError) {
-            console.error('Failed to send failure DM:', dmError);
+            if (!result.success) {
+                await interaction.editReply(`❌ ${result.error}`);
+                await interaction.user.send('Sensitivity Web Linked failed').catch(() => {});
+                return;
+            }
+
+            const user = result.data.user;
+            
+            let linkedUsers = await github.getData('data/linked_users.json') || {};
+            
+            linkedUsers[userId] = {
+                username: user.username,
+                role: user.role,
+                userId: user.id,
+                linkedAt: new Date().toISOString()
+            };
+
+            await github.saveData('data/linked_users.json', linkedUsers, 'Update linked users');
+
+            await interaction.editReply('✅ Successfully linked to sensitivity website!');
+            await interaction.user.send('Sensitivity Web Linked successfully').catch(() => {});
+
+        } catch (error) {
+            console.error('Login error:', error);
+            await interaction.editReply('❌ An error occurred during login');
+            await interaction.user.send('Sensitivity Web Linked failed').catch(() => {});
         }
     }
-}
-
-module.exports = {
-    loginCommand,
-    handleLoginModal,
-    refreshUserSession,
-    data: loginCommand.data,
-    execute: loginCommand.execute
 };
