@@ -1,11 +1,7 @@
-async generateSensitivity(interaction, deviceName, userData) {
-        try {
-            const linkedUsers = await github.getData('data/linked_users.json') || {};
-            const userCredentials = linkedUsers[interaction.user.id];
-            
-            if (!userCredentialsconst { SlashCommandBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ActionRowBuilder, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+const { SlashCommandBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ActionRowBuilder, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const { WebsiteAPI } = require('../utils/websiteAPI');
 const github = require('../utils/github');
+const axios = require('axios'); 
 
 const websiteAPI = new WebsiteAPI();
 
@@ -310,6 +306,7 @@ module.exports = {
                 return;
             }
 
+            // Prepare API request
             const sensitivityParams = {
                 username: userCredentials.username,
                 password: userCredentials.password || '',
@@ -319,15 +316,21 @@ module.exports = {
                 ...(userData.selectedFingers && { fingers: userData.selectedFingers })
             };
 
-            const result = await websiteAPI.calculateSensitivity(sensitivityParams);
-
-            if (!result.success) {
+            // Call your API endpoint directly (update with your actual domain)
+            const apiResponse = await axios.post(`${process.env.API_BASE_URL || 'http://localhost:3000'}/api/sensitivity`, sensitivityParams, {
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                timeout: 30000 // 30 second timeout
+            });
+            
+            if (!apiResponse.data.success) {
                 const reply = interaction.replied || interaction.deferred ? 'editReply' : 'reply';
-                await interaction[reply](`❌ ${result.error}`);
+                await interaction[reply](`❌ ${apiResponse.data.error}`);
                 return;
             }
 
-            const { sensitivity, user, game, device, playstyle, fingers } = result.data;
+            const { sensitivity, user, game, device, playstyle, fingers } = apiResponse.data.data;
             const isVip = user.role === 'vip' || user.role === 'admin';
             let embed;
 
@@ -377,7 +380,12 @@ module.exports = {
         } catch (error) {
             console.error('Generate sensitivity error:', error);
             const reply = interaction.replied || interaction.deferred ? 'editReply' : 'reply';
-            await interaction[reply]('❌ An error occurred generating your sensitivity.');
+            
+            if (error.response?.data?.error) {
+                await interaction[reply](`❌ ${error.response.data.error}`);
+            } else {
+                await interaction[reply]('❌ An error occurred generating your sensitivity.');
+            }
         }
     }
 };
