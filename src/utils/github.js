@@ -15,7 +15,8 @@ const FILE_PATHS = {
     daily: 'data/economy/daily.json',
     levels: 'data/leveling/levels.json',
     timers: 'data/features/timers.json',
-    bank: 'data/economy/bank.json'
+    bank: 'data/economy/bank.json',
+    linked_users: 'data/linked_users.json' // Added for sensitivity login system
 };
 
 async function initializeRepo(octokit, owner, repo) {
@@ -226,6 +227,15 @@ async function saveBankData(bankData, message = 'Update bank data') {
     return await saveData('bank', bankData, message);
 }
 
+// New helper functions for linked users
+async function getLinkedUsers() {
+    return await getData('linked_users');
+}
+
+async function saveLinkedUsers(linkedUsers, message = 'Update linked users') {
+    return await saveData('linked_users', linkedUsers, message);
+}
+
 // Test function to verify permissions
 async function testPermissions() {
     try {
@@ -292,6 +302,8 @@ module.exports = {
     saveTimers,
     getBankData,
     saveBankData,
+    getLinkedUsers,
+    saveLinkedUsers,
     
     // Path mapping
     FILE_PATHS
