@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const { getConfig, saveConfig } = require('../utils/github-storage');
+const { getConfig, saveConfig } = require('../utils/github.js');
 
 // Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
