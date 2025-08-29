@@ -1,7 +1,14 @@
 const { SlashCommandBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ActionRowBuilder, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+const { createClient } = require('@supabase/supabase-js');
 const { WebsiteAPI } = require('../utils/websiteAPI');
 const github = require('../utils/github');
 
+// Initialize Supabase client
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+// Keep WebsiteAPI for device search and sensitivity calculation only
 const websiteAPI = new WebsiteAPI();
 
 module.exports = {
@@ -23,28 +30,56 @@ module.exports = {
                 return;
             }
 
-            const userInfo = await websiteAPI.getUserInfo(linkedUsers[userId].username);
-            
-            if (!userInfo.success) {
+            const userData = linkedUsers[userId];
+
+            // Query Supabase directly to get fresh user data
+            const { data: user, error: userError } = await supabase
+                .from('users')
+                .select('*')
+                .eq('id', userData.supabaseUserId)
+                .single();
+
+            if (userError || !user) {
                 await interaction.reply({
-                    content: '❌ Account verification failed. Please login again.',
+                    content: '❌ Account verification failed. Please login again with `/login`',
                     ephemeral: true
                 });
                 return;
             }
 
-            const user = userInfo.data.user;
-            
-            if (user.suspended) {
+            // Check if user is suspended
+            if (user.suspended_at) {
+                let suspensionMessage = '❌ Your account is suspended';
+                if (user.suspension_reason) {
+                    suspensionMessage += `\nReason: ${user.suspension_reason}`;
+                }
                 await interaction.reply({
-                    content: '❌ Your account is suspended',
+                    content: suspensionMessage,
                     ephemeral: true
                 });
                 return;
             }
 
-            linkedUsers[userId].role = user.role;
-            await github.saveData('data/linked_users.json', linkedUsers, 'Update user role');
+            // Check and update VIP status
+            let vipStatus = 'Regular';
+            if (user.vip_expires_at) {
+                const vipExpiry = new Date(user.vip_expires_at);
+                if (vipExpiry > new Date()) {
+                    vipStatus = 'VIP';
+                } else {
+                    vipStatus = 'VIP Expired';
+                }
+            }
+
+            // Update stored user data with fresh info
+            linkedUsers[userId] = {
+                ...linkedUsers[userId],
+                role: user.role,
+                vipStatus: vipStatus,
+                vipExpiresAt: user.vip_expires_at,
+                lastVerified: new Date().toISOString()
+            };
+            await github.saveData('data/linked_users.json', linkedUsers, 'Update user verification');
 
             const gameSelect = new StringSelectMenuBuilder()
                 .setCustomId('game_select')
@@ -62,8 +97,14 @@ module.exports = {
 
             const row = new ActionRowBuilder().addComponents(gameSelect);
 
+            let welcomeMessage = `Welcome ${user.username}! (${user.role})`;
+            if (vipStatus === 'VIP') {
+                welcomeMessage += ` 👑`;
+            }
+            welcomeMessage += ` Select your game:`;
+
             await interaction.reply({
-                content: `Welcome ${linkedUsers[userId].username}! (${user.role}) Select your game:`,
+                content: welcomeMessage,
                 components: [row],
                 ephemeral: true
             });
@@ -83,7 +124,18 @@ module.exports = {
 
         try {
             const linkedUsers = await github.getData('data/linked_users.json') || {};
-            const userRole = linkedUsers[userId]?.role || 'user';
+            const userData = linkedUsers[userId];
+            
+            if (!userData) {
+                await interaction.update({
+                    content: '❌ Session expired. Please start over with `/sensitivity`',
+                    components: []
+                });
+                return;
+            }
+
+            // Check VIP status for features
+            const isVip = userData.vipStatus === 'VIP';
 
             if (game === 'codm') {
                 const fingerSelect = new StringSelectMenuBuilder()
@@ -107,8 +159,6 @@ module.exports = {
                 await github.saveData('data/linked_users.json', linkedUsers, 'Update game selection');
 
             } else if (game === 'freefire') {
-                const isVip = userRole === 'vip' || userRole === 'admin';
-
                 const playstyleOptions = [
                     new StringSelectMenuOptionBuilder().setLabel('Balanced').setValue('Balanced').setEmoji('⚖️')
                 ];
@@ -129,7 +179,7 @@ module.exports = {
                 const row = new ActionRowBuilder().addComponents(playstyleSelect);
 
                 await interaction.update({
-                    content: isVip ? 'Choose your playstyle (VIP):' : 'Choose your playstyle (Free - Balanced only):',
+                    content: isVip ? 'Choose your playstyle (VIP): 👑' : 'Choose your playstyle (Free - Balanced only):',
                     components: [row]
                 });
 
@@ -139,9 +189,9 @@ module.exports = {
 
         } catch (error) {
             console.error('Game selection error:', error);
-            await interaction.reply({
+            await interaction.update({
                 content: '❌ An error occurred processing your selection.',
-                ephemeral: true
+                components: []
             });
         }
     },
@@ -152,8 +202,17 @@ module.exports = {
 
         try {
             const linkedUsers = await github.getData('data/linked_users.json') || {};
-            const userRole = linkedUsers[userId]?.role || 'user';
-            const isVip = userRole === 'vip' || userRole === 'admin';
+            const userData = linkedUsers[userId];
+            
+            if (!userData) {
+                await interaction.update({
+                    content: '❌ Session expired. Please start over with `/sensitivity`',
+                    components: []
+                });
+                return;
+            }
+
+            const isVip = userData.vipStatus === 'VIP';
 
             const playstyleOptions = [
                 new StringSelectMenuOptionBuilder().setLabel('Balanced').setValue('Balanced').setEmoji('⚖️')
@@ -175,7 +234,7 @@ module.exports = {
             const row = new ActionRowBuilder().addComponents(playstyleSelect);
 
             await interaction.update({
-                content: isVip ? `${fingers} selected. Choose your playstyle (VIP):` : `${fingers} selected. Choose your playstyle (Free - Balanced only):`,
+                content: isVip ? `${fingers} selected. Choose your playstyle (VIP): 👑` : `${fingers} selected. Choose your playstyle (Free - Balanced only):`,
                 components: [row]
             });
 
@@ -184,9 +243,9 @@ module.exports = {
 
         } catch (error) {
             console.error('Finger selection error:', error);
-            await interaction.reply({
+            await interaction.update({
                 content: '❌ An error occurred processing your selection.',
-                ephemeral: true
+                components: []
             });
         }
     },
@@ -306,17 +365,30 @@ module.exports = {
                 return;
             }
 
+            // Get user's password from Supabase for API authentication
+            const { data: supabaseUser, error: userError } = await supabase
+                .from('users')
+                .select('password_hash')
+                .eq('id', userCredentials.supabaseUserId)
+                .single();
+
+            if (userError || !supabaseUser) {
+                const reply = interaction.replied || interaction.deferred ? 'editReply' : 'reply';
+                await interaction[reply]('❌ Could not verify account. Please login again.');
+                return;
+            }
+
             // Prepare API request parameters
             const sensitivityParams = {
                 username: userCredentials.username,
-                password: userCredentials.password || '',
+                password: supabaseUser.password_hash, // Use actual password from database
                 game: userData.selectedGame,
                 device: deviceName,
                 playstyle: userData.selectedPlaystyle,
                 ...(userData.selectedFingers && { fingers: userData.selectedFingers })
             };
 
-            // Call the sensitivity calculation API
+            // Call your website's sensitivity calculation API
             const result = await websiteAPI.calculateSensitivity(sensitivityParams);
 
             if (!result.success) {
@@ -334,7 +406,7 @@ module.exports = {
                 embed = new EmbedBuilder()
                     .setColor(0xFF4500)
                     .setTitle('🔥 Free Fire Sensitivity')
-                    .setDescription(`**Device:** ${device}\n**Playstyle:** ${playstyle}\n**Account:** ${isVip ? 'VIP' : 'Free'}`)
+                    .setDescription(`**Device:** ${device}\n**Playstyle:** ${playstyle}\n**Account:** ${isVip ? 'VIP 👑' : 'Free'}`)
                     .addFields(
                         { name: '📱 Camera', value: `${sensitivity.camera}`, inline: true },
                         { name: '🎯 ADS', value: `${sensitivity.ads}`, inline: true },
@@ -348,7 +420,7 @@ module.exports = {
                 embed = new EmbedBuilder()
                     .setColor(0x00FF00)
                     .setTitle('🔫 CODM Sensitivity')
-                    .setDescription(`**Device:** ${device}\n**Fingers:** ${fingers}\n**Playstyle:** ${playstyle}\n**Account:** ${isVip ? 'VIP' : 'Free'}`)
+                    .setDescription(`**Device:** ${device}\n**Fingers:** ${fingers}\n**Playstyle:** ${playstyle}\n**Account:** ${isVip ? 'VIP 👑' : 'Free'}`)
                     .addFields(
                         { name: '📱 Camera', value: `${sensitivity.camera}`, inline: true },
                         { name: '🎯 ADS', value: `${sensitivity.ads}`, inline: true },
