@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
-const { getConfig, saveConfig } = require('../utils/github.js');
+const { getConfig, saveConfig } = require('../utils/github');
 
 module.exports = {
     data: new SlashCommandBuilder()
