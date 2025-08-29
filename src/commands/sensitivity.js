@@ -113,7 +113,7 @@ module.exports = {
             await github.saveData('data/linked_users.json', linkedUsers, 'Update user verification');
 
             const gameSelect = new StringSelectMenuBuilder()
-                .setCustomId(`game_select_${userId}_${Date.now()}`) // Unique ID
+                .setCustomId('game_select')
                 .setPlaceholder('Choose a game')
                 .addOptions(
                     new StringSelectMenuOptionBuilder()
@@ -171,7 +171,7 @@ module.exports = {
 
             if (game === 'codm') {
                 const fingerSelect = new StringSelectMenuBuilder()
-                    .setCustomId(`finger_select_${userId}_${Date.now()}`) // Unique ID
+                    .setCustomId('finger_select')
                     .setPlaceholder('How many fingers do you use?')
                     .addOptions(
                         new StringSelectMenuOptionBuilder().setLabel('2 Fingers').setValue('2f'),
@@ -204,7 +204,7 @@ module.exports = {
                 }
 
                 const playstyleSelect = new StringSelectMenuBuilder()
-                    .setCustomId(`playstyle_select_${userId}_${Date.now()}`) // Unique ID
+                    .setCustomId('playstyle_select')
                     .setPlaceholder('Choose your playstyle')
                     .addOptions(playstyleOptions);
 
@@ -261,7 +261,7 @@ module.exports = {
             }
 
             const playstyleSelect = new StringSelectMenuBuilder()
-                .setCustomId(`playstyle_select_${userId}_${Date.now()}`) // Unique ID
+                .setCustomId('playstyle_select')
                 .setPlaceholder('Choose your playstyle')
                 .addOptions(playstyleOptions);
 
@@ -292,7 +292,7 @@ module.exports = {
             const userId = interaction.user.id;
 
             const modal = new ModalBuilder()
-                .setCustomId(`device_modal_${userId}_${Date.now()}`) // Unique ID
+                .setCustomId('device_modal')
                 .setTitle('Enter Your Device');
 
             const deviceInput = new TextInputBuilder()
@@ -328,7 +328,7 @@ module.exports = {
             
             await interaction.deferReply({ ephemeral: true });
 
-            const deviceQuery = interaction.fields.getTextInputValue('device_name');
+            const deviceQuery = interaction.fields.getTextInputValue('device_name').toLowerCase();
             const userId = interaction.user.id;
 
             const linkedUsers = await github.getData('data/linked_users.json') || {};
@@ -339,17 +339,43 @@ module.exports = {
                 return;
             }
 
-            const searchResult = await websiteAPI.searchDevices(deviceQuery);
-            
-            if (!searchResult.success) {
-                await interaction.editReply('❌ Device search failed. Please try again.');
+            // Get device database (you'll need to import or require your device database)
+            let deviceDatabase;
+            try {
+                deviceDatabase = require('../data/deviceDatabase').deviceDatabase;
+            } catch (error) {
+                // Fallback if deviceDatabase is not available
+                await interaction.editReply('❌ Device database not available. Please try again later.');
                 return;
             }
 
-            const matchingDevices = searchResult.data.devices.map(d => d.name);
+            // Search devices in database
+            const matchingDevices = Object.keys(deviceDatabase)
+                .filter(deviceName => deviceName.toLowerCase().includes(deviceQuery))
+                .slice(0, 25); // Discord limit is 25 options
 
             if (matchingDevices.length === 0) {
-                await interaction.editReply(`❌ No devices found matching "${deviceQuery}". Please try a different search term.`);
+                // Show popular devices if no search results
+                const popularDevices = Object.keys(deviceDatabase).slice(0, 20);
+                
+                const deviceOptions = popularDevices.map(device => 
+                    new StringSelectMenuOptionBuilder()
+                        .setLabel(device.length > 100 ? device.substring(0, 97) + '...' : device)
+                        .setValue(device)
+                        .setDescription(`${deviceDatabase[device].screenSize || 6.1}" • ${deviceDatabase[device].refreshRate || 60}Hz`)
+                );
+
+                const deviceSelect = new StringSelectMenuBuilder()
+                    .setCustomId('device_final_select')
+                    .setPlaceholder('No matches found. Select from popular devices:')
+                    .addOptions(deviceOptions);
+
+                const row = new ActionRowBuilder().addComponents(deviceSelect);
+
+                await interaction.editReply({
+                    content: `❌ No devices found matching "${deviceQuery}". Here are some popular devices:`,
+                    components: [row]
+                });
                 return;
             }
 
@@ -358,21 +384,23 @@ module.exports = {
                 return;
             }
 
-            const deviceOptions = matchingDevices.slice(0, 10).map(device => 
-                new StringSelectMenuOptionBuilder()
-                    .setLabel(device)
+            const deviceOptions = matchingDevices.map(device => {
+                const deviceInfo = deviceDatabase[device];
+                return new StringSelectMenuOptionBuilder()
+                    .setLabel(device.length > 100 ? device.substring(0, 97) + '...' : device)
                     .setValue(device)
-            );
+                    .setDescription(`${deviceInfo.screenSize || 6.1}" • ${deviceInfo.refreshRate || 60}Hz`);
+            });
 
             const deviceSelect = new StringSelectMenuBuilder()
-                .setCustomId(`device_final_select_${userId}_${Date.now()}`) // Unique ID
+                .setCustomId('device_final_select')
                 .setPlaceholder('Select your exact device')
                 .addOptions(deviceOptions);
 
             const row = new ActionRowBuilder().addComponents(deviceSelect);
 
             await interaction.editReply({
-                content: `Found ${matchingDevices.length} devices matching "${deviceQuery}". Please select your exact device:`,
+                content: `Found ${matchingDevices.length} devices matching "${deviceQuery}":`,
                 components: [row]
             });
 
@@ -432,7 +460,7 @@ module.exports = {
 
             const { data: supabaseUser, error: userError } = await supabase
                 .from('users')
-                .select('password_hash')
+                .select('*')
                 .eq('id', userCredentials.supabaseUserId)
                 .single();
 
@@ -444,55 +472,120 @@ module.exports = {
                 return;
             }
 
-            const sensitivityParams = {
-                username: userCredentials.username,
-                password: supabaseUser.password_hash,
-                game: userData.selectedGame,
-                device: deviceName,
-                playstyle: userData.selectedPlaystyle,
-                ...(userData.selectedFingers && { fingers: userData.selectedFingers })
-            };
-
-            const result = await websiteAPI.calculateSensitivity(sensitivityParams);
-
-            if (!result.success) {
+            // Get device info from local database
+            let deviceDatabase;
+            try {
+                deviceDatabase = require('../data/deviceDatabase').deviceDatabase;
+            } catch (error) {
                 await safeInteractionReply(interaction, {
-                    content: `❌ ${result.error}`,
+                    content: '❌ Device database not available.',
                     ephemeral: true
                 });
                 return;
             }
 
-            const { sensitivity, user, game, device, playstyle, fingers } = result.data;
-            const isVip = user.role === 'vip' || user.role === 'admin';
+            const deviceInfo = deviceDatabase[deviceName];
+            if (!deviceInfo) {
+                await safeInteractionReply(interaction, {
+                    content: '❌ Device information not found.',
+                    ephemeral: true
+                });
+                return;
+            }
+
+            // Create device object
+            const device = {
+                name: deviceName,
+                screen_size_inches: deviceInfo.screenSize || 6.1,
+                refresh_rate_hz: deviceInfo.refreshRate || 60,
+                touch_sampling_rate_hz: deviceInfo.touchSamplingRate || 120,
+                type: (deviceInfo.screenSize || 6.1) >= 7 ? "tablet" : "phone"
+            };
+
+            // Calculate sensitivity based on device specs and user preferences
+            let sensitivity;
+            const game = userData.selectedGame;
+            const playstyle = userData.selectedPlaystyle;
+            const fingers = userData.selectedFingers;
+            const isVip = supabaseUser.role === 'vip' || supabaseUser.role === 'admin';
+
+            if (game === 'freefire') {
+                // Free Fire sensitivity calculation
+                const baseMultiplier = device.type === 'tablet' ? 0.8 : 1.0;
+                const refreshMultiplier = device.refresh_rate_hz >= 90 ? 1.1 : 1.0;
+                const playstyleMultipliers = {
+                    'Balanced': 1.0,
+                    'Aggressive': 1.2,
+                    'Precise': 0.8,
+                    'Defensive': 0.9
+                };
+
+                const multiplier = baseMultiplier * refreshMultiplier * (playstyleMultipliers[playstyle] || 1.0);
+
+                sensitivity = {
+                    camera: Math.round(75 * multiplier),
+                    ads: Math.round(60 * multiplier),
+                    fire: Math.round(85 * multiplier),
+                    gyro: Math.round(50 * multiplier)
+                };
+
+            } else if (game === 'codm') {
+                // CODM sensitivity calculation
+                const baseMultiplier = device.type === 'tablet' ? 0.7 : 1.0;
+                const refreshMultiplier = device.refresh_rate_hz >= 90 ? 1.15 : 1.0;
+                const fingerMultipliers = {
+                    '2f': 1.0,
+                    '3f': 1.1,
+                    '4f': 1.2,
+                    '4f+': 1.3
+                };
+                const playstyleMultipliers = {
+                    'Balanced': 1.0,
+                    'Aggressive': 1.25,
+                    'Precise': 0.75,
+                    'Defensive': 0.85
+                };
+
+                const multiplier = baseMultiplier * refreshMultiplier * 
+                                (fingerMultipliers[fingers] || 1.0) * 
+                                (playstyleMultipliers[playstyle] || 1.0);
+
+                sensitivity = {
+                    camera: Math.round(65 * multiplier),
+                    ads: Math.round(55 * multiplier),
+                    hipfire: Math.round(70 * multiplier),
+                    scope: Math.round(45 * multiplier)
+                };
+            }
+
             let embed;
 
             if (game === 'freefire') {
                 embed = new EmbedBuilder()
                     .setColor(0xFF4500)
                     .setTitle('🔥 Free Fire Sensitivity')
-                    .setDescription(`**Device:** ${device}\n**Playstyle:** ${playstyle}\n**Account:** ${isVip ? 'VIP 👑' : 'Free'}`)
+                    .setDescription(`**Device:** ${deviceName}\n**Playstyle:** ${playstyle}\n**Account:** ${isVip ? 'VIP 👑' : 'Free'}`)
                     .addFields(
                         { name: '📱 Camera', value: `${sensitivity.camera}`, inline: true },
                         { name: '🎯 ADS', value: `${sensitivity.ads}`, inline: true },
                         { name: '💥 Fire Button', value: `${sensitivity.fire}`, inline: true },
                         { name: '🔄 Gyroscope', value: `${sensitivity.gyro}`, inline: true }
                     )
-                    .setFooter({ text: `Generated for ${user.username}` })
+                    .setFooter({ text: `Generated for ${supabaseUser.username}` })
                     .setTimestamp();
 
             } else if (game === 'codm') {
                 embed = new EmbedBuilder()
                     .setColor(0x00FF00)
                     .setTitle('🔫 CODM Sensitivity')
-                    .setDescription(`**Device:** ${device}\n**Fingers:** ${fingers}\n**Playstyle:** ${playstyle}\n**Account:** ${isVip ? 'VIP 👑' : 'Free'}`)
+                    .setDescription(`**Device:** ${deviceName}\n**Fingers:** ${fingers}\n**Playstyle:** ${playstyle}\n**Account:** ${isVip ? 'VIP 👑' : 'Free'}`)
                     .addFields(
                         { name: '📱 Camera', value: `${sensitivity.camera}`, inline: true },
                         { name: '🎯 ADS', value: `${sensitivity.ads}`, inline: true },
                         { name: '💥 Hip Fire', value: `${sensitivity.hipfire}`, inline: true },
                         { name: '🔍 Scope', value: `${sensitivity.scope}`, inline: true }
                     )
-                    .setFooter({ text: `Generated for ${user.username}` })
+                    .setFooter({ text: `Generated for ${supabaseUser.username}` })
                     .setTimestamp();
             }
 
@@ -517,9 +610,6 @@ module.exports = {
             console.error('Generate sensitivity error:', error);
             
             let errorMessage = '❌ An error occurred generating your sensitivity.';
-            if (error.response?.data?.error) {
-                errorMessage = `❌ ${error.response.data.error}`;
-            }
 
             await safeInteractionReply(interaction, {
                 content: errorMessage,
