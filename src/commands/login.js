@@ -8,9 +8,6 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// Keep WebsiteAPI instance for other operations (device search, sensitivity calc, etc.)
-const websiteAPI = new WebsiteAPI();
-
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('login')
