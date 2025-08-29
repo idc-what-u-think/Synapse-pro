@@ -150,7 +150,9 @@ module.exports = {
                 vipStatus: vipStatus,
                 vipExpiresAt: user.vip_expires_at,
                 lastVerified: new Date().toISOString(),
-                selectedDevice: deviceQuery // Store the selected device
+                selectedDevice: deviceQuery,
+                username: user.username,
+                password: user.password_hash // Store for API calls
             };
             await github.saveData('data/linked_users.json', linkedUsers, 'Update user verification');
 
@@ -191,10 +193,15 @@ module.exports = {
         }
     },
 
-    // NEW: Autocomplete handler
+    // Fixed autocomplete handler
     async autocomplete(interaction) {
         try {
             const focusedValue = interaction.options.getFocused();
+            
+            // Prevent multiple responses by checking if already responded
+            if (interaction.responded) {
+                return;
+            }
             
             if (!focusedValue || focusedValue.length < 1) {
                 // Show popular devices when no input
@@ -208,7 +215,9 @@ module.exports = {
                     
                     await interaction.respond(choices);
                 } catch (error) {
-                    await interaction.respond([]);
+                    if (!interaction.responded) {
+                        await interaction.respond([]);
+                    }
                 }
                 return;
             }
@@ -247,12 +256,22 @@ module.exports = {
                 };
             });
 
-            await interaction.respond(choices);
+            // Only respond if we haven't already
+            if (!interaction.responded) {
+                await interaction.respond(choices);
+            }
 
         } catch (error) {
             console.error('Autocomplete error:', error);
             // Always respond, even with empty array, to prevent Discord errors
-            await interaction.respond([]);
+            if (!interaction.responded) {
+                try {
+                    await interaction.respond([]);
+                } catch (respondError) {
+                    // If even this fails, log it but don't throw
+                    console.error('Failed to respond with empty array:', respondError);
+                }
+            }
         }
     },
 
@@ -405,7 +424,7 @@ module.exports = {
             linkedUsers[userId].selectedPlaystyle = playstyle;
             await github.saveData('data/linked_users.json', linkedUsers, 'Update playstyle selection');
 
-            // Now we have all the data needed, generate sensitivity
+            // Now we have all the data needed, call website API to generate sensitivity
             const userData = linkedUsers[userId];
             const deviceName = userData.selectedDevice;
 
@@ -417,7 +436,7 @@ module.exports = {
                 return;
             }
 
-            await this.generateSensitivity(interaction, deviceName, userData);
+            await this.generateSensitivityFromAPI(interaction, userData);
 
         } catch (error) {
             console.error('Playstyle selection error:', error);
@@ -428,133 +447,46 @@ module.exports = {
         }
     },
 
-    async generateSensitivity(interaction, deviceName, userData) {
+    async generateSensitivityFromAPI(interaction, userData) {
         try {
-            const linkedUsers = await github.getData('data/linked_users.json') || {};
-            const userCredentials = linkedUsers[interaction.user.id];
+            const userId = interaction.user.id;
             
-            if (!userCredentials || !userCredentials.username) {
+            if (!userData.username || !userData.password) {
                 await safeInteractionReply(interaction, {
-                    content: '❌ User credentials not found. Please login again.',
+                    content: '❌ Authentication credentials not found. Please login again.',
                     ephemeral: true
                 });
                 return;
             }
 
-            const { data: supabaseUser, error: userError } = await supabase
-                .from('users')
-                .select('*')
-                .eq('id', userCredentials.supabaseUserId)
-                .single();
-
-            if (userError || !supabaseUser) {
-                await safeInteractionReply(interaction, {
-                    content: '❌ Could not verify account. Please login again.',
-                    ephemeral: true
-                });
-                return;
-            }
-
-            // Try to get device info from API first
-            let deviceInfo = null;
-            try {
-                const apiResult = await websiteAPI.searchDevices(deviceName);
-                if (apiResult.success && apiResult.data && apiResult.data.devices) {
-                    const exactMatch = apiResult.data.devices.find(d => d.name === deviceName);
-                    if (exactMatch) {
-                        deviceInfo = exactMatch.info;
-                    }
-                }
-            } catch (error) {
-                console.log('API device lookup failed, using local database');
-            }
-
-            // Fallback to local database
-            if (!deviceInfo) {
-                try {
-                    const deviceDatabase = require('../data/deviceDatabase').deviceDatabase;
-                    deviceInfo = deviceDatabase[deviceName];
-                } catch (error) {
-                    await safeInteractionReply(interaction, {
-                        content: '❌ Device database not available.',
-                        ephemeral: true
-                    });
-                    return;
-                }
-            }
-
-            if (!deviceInfo) {
-                await safeInteractionReply(interaction, {
-                    content: '❌ Device information not found.',
-                    ephemeral: true
-                });
-                return;
-            }
-
-            // Create device object
-            const device = {
-                name: deviceName,
-                screen_size_inches: deviceInfo.screenSize || 6.1,
-                refresh_rate_hz: deviceInfo.refreshRate || 60,
-                touch_sampling_rate_hz: deviceInfo.touchSamplingRate || 120,
-                type: (deviceInfo.screenSize || 6.1) >= 7 ? "tablet" : "phone"
+            // Prepare parameters for API call
+            const apiParams = {
+                username: userData.username,
+                password: userData.password,
+                game: userData.selectedGame,
+                device: userData.selectedDevice,
+                playstyle: userData.selectedPlaystyle
             };
 
-            // Calculate sensitivity based on device specs and user preferences
-            let sensitivity;
-            const game = userData.selectedGame;
-            const playstyle = userData.selectedPlaystyle;
-            const fingers = userData.selectedFingers;
-            const isVip = supabaseUser.role === 'vip' || supabaseUser.role === 'admin';
-
-            if (game === 'freefire') {
-                // Free Fire sensitivity calculation
-                const baseMultiplier = device.type === 'tablet' ? 0.8 : 1.0;
-                const refreshMultiplier = device.refresh_rate_hz >= 90 ? 1.1 : 1.0;
-                const playstyleMultipliers = {
-                    'Balanced': 1.0,
-                    'Aggressive': 1.2,
-                    'Precise': 0.8,
-                    'Defensive': 0.9
-                };
-
-                const multiplier = baseMultiplier * refreshMultiplier * (playstyleMultipliers[playstyle] || 1.0);
-
-                sensitivity = {
-                    camera: Math.round(75 * multiplier),
-                    ads: Math.round(60 * multiplier),
-                    fire: Math.round(85 * multiplier),
-                    gyro: Math.round(50 * multiplier)
-                };
-
-            } else if (game === 'codm') {
-                // CODM sensitivity calculation
-                const baseMultiplier = device.type === 'tablet' ? 0.7 : 1.0;
-                const refreshMultiplier = device.refresh_rate_hz >= 90 ? 1.15 : 1.0;
-                const fingerMultipliers = {
-                    '2f': 1.0,
-                    '3f': 1.1,
-                    '4f': 1.2,
-                    '4f+': 1.3
-                };
-                const playstyleMultipliers = {
-                    'Balanced': 1.0,
-                    'Aggressive': 1.25,
-                    'Precise': 0.75,
-                    'Defensive': 0.85
-                };
-
-                const multiplier = baseMultiplier * refreshMultiplier * 
-                                (fingerMultipliers[fingers] || 1.0) * 
-                                (playstyleMultipliers[playstyle] || 1.0);
-
-                sensitivity = {
-                    camera: Math.round(65 * multiplier),
-                    ads: Math.round(55 * multiplier),
-                    hipfire: Math.round(70 * multiplier),
-                    scope: Math.round(45 * multiplier)
-                };
+            // Add fingers parameter for CODM
+            if (userData.selectedGame === 'codm' && userData.selectedFingers) {
+                apiParams.fingers = userData.selectedFingers;
             }
+
+            // Call your website API to calculate sensitivity
+            const apiResult = await websiteAPI.calculateSensitivity(apiParams);
+
+            if (!apiResult.success) {
+                await safeInteractionReply(interaction, {
+                    content: `❌ Failed to generate sensitivity: ${apiResult.error}`,
+                    ephemeral: true
+                });
+                return;
+            }
+
+            // Extract data from API response
+            const { sensitivity, user: apiUser, game, device, playstyle, fingers } = apiResult.data;
+            const isVip = userData.vipStatus === 'VIP';
 
             let embed;
 
@@ -562,28 +494,28 @@ module.exports = {
                 embed = new EmbedBuilder()
                     .setColor(0xFF4500)
                     .setTitle('🔥 Free Fire Sensitivity')
-                    .setDescription(`**Device:** ${deviceName}\n**Screen:** ${device.screen_size_inches}" • **Refresh:** ${device.refresh_rate_hz}Hz\n**Playstyle:** ${playstyle}\n**Account:** ${isVip ? 'VIP 👑' : 'Free'}`)
+                    .setDescription(`**Device:** ${device}\n**Playstyle:** ${playstyle}\n**Account:** ${isVip ? 'VIP 👑' : 'Free'}`)
                     .addFields(
                         { name: '📱 Camera', value: `${sensitivity.camera}`, inline: true },
                         { name: '🎯 ADS', value: `${sensitivity.ads}`, inline: true },
                         { name: '💥 Fire Button', value: `${sensitivity.fire}`, inline: true },
                         { name: '🔄 Gyroscope', value: `${sensitivity.gyro}`, inline: true }
                     )
-                    .setFooter({ text: `Generated for ${supabaseUser.username}` })
+                    .setFooter({ text: `Generated for ${apiUser.username}` })
                     .setTimestamp();
 
             } else if (game === 'codm') {
                 embed = new EmbedBuilder()
                     .setColor(0x00FF00)
                     .setTitle('🔫 CODM Sensitivity')
-                    .setDescription(`**Device:** ${deviceName}\n**Screen:** ${device.screen_size_inches}" • **Refresh:** ${device.refresh_rate_hz}Hz\n**Fingers:** ${fingers}\n**Playstyle:** ${playstyle}\n**Account:** ${isVip ? 'VIP 👑' : 'Free'}`)
+                    .setDescription(`**Device:** ${device}\n**Fingers:** ${fingers}\n**Playstyle:** ${playstyle}\n**Account:** ${isVip ? 'VIP 👑' : 'Free'}`)
                     .addFields(
                         { name: '📱 Camera', value: `${sensitivity.camera}`, inline: true },
                         { name: '🎯 ADS', value: `${sensitivity.ads}`, inline: true },
                         { name: '💥 Hip Fire', value: `${sensitivity.hipfire}`, inline: true },
                         { name: '🔍 Scope', value: `${sensitivity.scope}`, inline: true }
                     )
-                    .setFooter({ text: `Generated for ${supabaseUser.username}` })
+                    .setFooter({ text: `Generated for ${apiUser.username}` })
                     .setTimestamp();
             }
 
@@ -608,6 +540,9 @@ module.exports = {
             console.error('Generate sensitivity error:', error);
             
             let errorMessage = '❌ An error occurred generating your sensitivity.';
+            if (error.message && error.message.includes('timeout')) {
+                errorMessage += ' The API request timed out. Please try again.';
+            }
 
             await safeInteractionReply(interaction, {
                 content: errorMessage,
