@@ -2,12 +2,16 @@ const { SlashCommandBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuil
 const { createClient } = require('@supabase/supabase-js');
 const { WebsiteAPI } = require('../utils/websiteAPI');
 const github = require('../utils/github');
+const fetch = require('node-fetch'); // Make sure to install: npm install node-fetch
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 const websiteAPI = new WebsiteAPI();
+
+// Your API base URL
+const API_BASE_URL = process.env.WEBSITE_API_URL || 'https://your-website.com'; // Add this to your .env
 
 // Helper function to safely respond to interactions
 async function safeInteractionReply(interaction, options) {
@@ -21,8 +25,7 @@ async function safeInteractionReply(interaction, options) {
         }
     } catch (error) {
         console.error('Failed to respond to interaction:', error);
-        // If all else fails, try followUp (only works if interaction was acknowledged)
-        if (error.code !== 40060) { // Not "already acknowledged" error
+        if (error.code !== 40060) {
             try {
                 return await interaction.followUp({ ...options, ephemeral: true });
             } catch (followUpError) {
@@ -39,23 +42,67 @@ async function safeInteractionUpdate(interaction, options) {
     } catch (error) {
         console.error('Failed to update interaction:', error);
         if (error.code === 10062 || error.code === 40060) {
-            // Interaction expired or already acknowledged
             return await safeInteractionReply(interaction, options);
         }
         throw error;
     }
 }
 
+// Device search function using your API
+async function searchDevicesFromAPI(query) {
+    try {
+        if (!query || query.length < 1) return [];
+        
+        const response = await fetch(`${API_BASE_URL}/api/devices/search?q=${encodeURIComponent(query)}`);
+        
+        if (!response.ok) {
+            console.error('API request failed:', response.status);
+            return [];
+        }
+        
+        const data = await response.json();
+        return data.devices || [];
+    } catch (error) {
+        console.error('Device search API error:', error);
+        return [];
+    }
+}
+
+// Fallback to local database if API fails
+function searchDevicesLocally(query) {
+    try {
+        const deviceDatabase = require('../data/deviceDatabase').deviceDatabase;
+        const lowercaseQuery = query.toLowerCase();
+        
+        return Object.keys(deviceDatabase)
+            .filter(device => device.toLowerCase().includes(lowercaseQuery))
+            .slice(0, 25)
+            .map(deviceName => ({
+                name: deviceName,
+                info: deviceDatabase[deviceName]
+            }));
+    } catch (error) {
+        console.error('Local device search error:', error);
+        return [];
+    }
+}
+
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('sensitivity')
-        .setDescription('Generate sensitivity settings for your device'),
+        .setDescription('Generate sensitivity settings for your device')
+        .addStringOption(option =>
+            option.setName('device')
+                .setDescription('Search for your device (start typing to see suggestions)')
+                .setAutocomplete(true)
+                .setRequired(true)
+        ),
     
     async execute(interaction) {
         const userId = interaction.user.id;
+        const deviceQuery = interaction.options.getString('device');
         
         try {
-            // Acknowledge the interaction immediately
             await interaction.deferReply({ ephemeral: true });
 
             const linkedUsers = await github.getData('data/linked_users.json') || {};
@@ -103,15 +150,18 @@ module.exports = {
                 }
             }
 
+            // Update user data
             linkedUsers[userId] = {
                 ...linkedUsers[userId],
                 role: user.role,
                 vipStatus: vipStatus,
                 vipExpiresAt: user.vip_expires_at,
-                lastVerified: new Date().toISOString()
+                lastVerified: new Date().toISOString(),
+                selectedDevice: deviceQuery // Store the selected device
             };
             await github.saveData('data/linked_users.json', linkedUsers, 'Update user verification');
 
+            // Now proceed with game selection since device is already chosen
             const gameSelect = new StringSelectMenuBuilder()
                 .setCustomId('game_select')
                 .setPlaceholder('Choose a game')
@@ -132,7 +182,7 @@ module.exports = {
             if (vipStatus === 'VIP') {
                 welcomeMessage += ` 👑`;
             }
-            welcomeMessage += ` Select your game:`;
+            welcomeMessage += `\n📱 **Device Selected:** ${deviceQuery}\nSelect your game:`;
 
             await interaction.editReply({
                 content: welcomeMessage,
@@ -148,9 +198,73 @@ module.exports = {
         }
     },
 
+    // NEW: Autocomplete handler
+    async autocomplete(interaction) {
+        try {
+            const focusedValue = interaction.options.getFocused();
+            
+            if (!focusedValue || focusedValue.length < 1) {
+                // Show popular devices when no input
+                try {
+                    const deviceDatabase = require('../data/deviceDatabase').deviceDatabase;
+                    const popularDevices = Object.keys(deviceDatabase).slice(0, 10);
+                    const choices = popularDevices.map(device => ({
+                        name: device.length > 100 ? device.substring(0, 97) + '...' : device,
+                        value: device
+                    }));
+                    
+                    await interaction.respond(choices);
+                } catch (error) {
+                    await interaction.respond([]);
+                }
+                return;
+            }
+
+            // First try API search
+            let devices = await searchDevicesFromAPI(focusedValue);
+            
+            // Fallback to local database if API fails or returns empty
+            if (devices.length === 0) {
+                devices = searchDevicesLocally(focusedValue);
+            }
+
+            // Format for Discord autocomplete
+            const choices = devices.slice(0, 25).map(device => {
+                const deviceName = device.name;
+                const specs = device.info;
+                
+                // Create a descriptive name showing key specs
+                let displayName = deviceName;
+                if (specs) {
+                    const screenSize = specs.screenSize ? `${specs.screenSize}"` : '';
+                    const refreshRate = specs.refreshRate ? `${specs.refreshRate}Hz` : '';
+                    const additional = [screenSize, refreshRate].filter(Boolean).join(' • ');
+                    
+                    if (additional) {
+                        const maxLength = 100 - additional.length - 3; // Account for " - " separator
+                        const truncatedName = deviceName.length > maxLength ? 
+                            deviceName.substring(0, maxLength - 3) + '...' : deviceName;
+                        displayName = `${truncatedName} - ${additional}`;
+                    }
+                }
+                
+                return {
+                    name: displayName.length > 100 ? displayName.substring(0, 97) + '...' : displayName,
+                    value: deviceName
+                };
+            });
+
+            await interaction.respond(choices);
+
+        } catch (error) {
+            console.error('Autocomplete error:', error);
+            // Always respond, even with empty array, to prevent Discord errors
+            await interaction.respond([]);
+        }
+    },
+
     async handleGameSelection(interaction) {
         try {
-            // Check if interaction is valid
             if (!interaction.isStringSelectMenu()) return;
             
             const game = interaction.values[0];
@@ -291,156 +405,32 @@ module.exports = {
             const playstyle = interaction.values[0];
             const userId = interaction.user.id;
 
-            const modal = new ModalBuilder()
-                .setCustomId('device_modal')
-                .setTitle('Enter Your Device');
-
-            const deviceInput = new TextInputBuilder()
-                .setCustomId('device_name')
-                .setLabel('Device Name')
-                .setStyle(TextInputStyle.Short)
-                .setPlaceholder('e.g., iPhone 14, Samsung Galaxy S23')
-                .setRequired(true)
-                .setMaxLength(100);
-
-            const deviceRow = new ActionRowBuilder().addComponents(deviceInput);
-            modal.addComponents(deviceRow);
+            await interaction.deferUpdate();
 
             const linkedUsers = await github.getData('data/linked_users.json') || {};
             linkedUsers[userId] = linkedUsers[userId] || {};
             linkedUsers[userId].selectedPlaystyle = playstyle;
             await github.saveData('data/linked_users.json', linkedUsers, 'Update playstyle selection');
 
-            await interaction.showModal(modal);
+            // Now we have all the data needed, generate sensitivity
+            const userData = linkedUsers[userId];
+            const deviceName = userData.selectedDevice;
+
+            if (!deviceName) {
+                await safeInteractionReply(interaction, {
+                    content: '❌ Device information lost. Please start over with `/sensitivity`',
+                    ephemeral: true
+                });
+                return;
+            }
+
+            await this.generateSensitivity(interaction, deviceName, userData);
 
         } catch (error) {
             console.error('Playstyle selection error:', error);
             await safeInteractionUpdate(interaction, {
                 content: '❌ An error occurred processing your selection.',
                 components: []
-            });
-        }
-    },
-
-    async handleDeviceModal(interaction) {
-        try {
-            if (!interaction.isModalSubmit()) return;
-            
-            await interaction.deferReply({ ephemeral: true });
-
-            const deviceQuery = interaction.fields.getTextInputValue('device_name').toLowerCase();
-            const userId = interaction.user.id;
-
-            const linkedUsers = await github.getData('data/linked_users.json') || {};
-            const userData = linkedUsers[userId];
-
-            if (!userData) {
-                await interaction.editReply('❌ Session expired. Please start over with `/sensitivity`');
-                return;
-            }
-
-            // Get device database (you'll need to import or require your device database)
-            let deviceDatabase;
-            try {
-                deviceDatabase = require('../data/deviceDatabase').deviceDatabase;
-            } catch (error) {
-                // Fallback if deviceDatabase is not available
-                await interaction.editReply('❌ Device database not available. Please try again later.');
-                return;
-            }
-
-            // Search devices in database
-            const matchingDevices = Object.keys(deviceDatabase)
-                .filter(deviceName => deviceName.toLowerCase().includes(deviceQuery))
-                .slice(0, 25); // Discord limit is 25 options
-
-            if (matchingDevices.length === 0) {
-                // Show popular devices if no search results
-                const popularDevices = Object.keys(deviceDatabase).slice(0, 20);
-                
-                const deviceOptions = popularDevices.map(device => 
-                    new StringSelectMenuOptionBuilder()
-                        .setLabel(device.length > 100 ? device.substring(0, 97) + '...' : device)
-                        .setValue(device)
-                        .setDescription(`${deviceDatabase[device].screenSize || 6.1}" • ${deviceDatabase[device].refreshRate || 60}Hz`)
-                );
-
-                const deviceSelect = new StringSelectMenuBuilder()
-                    .setCustomId('device_final_select')
-                    .setPlaceholder('No matches found. Select from popular devices:')
-                    .addOptions(deviceOptions);
-
-                const row = new ActionRowBuilder().addComponents(deviceSelect);
-
-                await interaction.editReply({
-                    content: `❌ No devices found matching "${deviceQuery}". Here are some popular devices:`,
-                    components: [row]
-                });
-                return;
-            }
-
-            if (matchingDevices.length === 1) {
-                await this.generateSensitivity(interaction, matchingDevices[0], userData);
-                return;
-            }
-
-            const deviceOptions = matchingDevices.map(device => {
-                const deviceInfo = deviceDatabase[device];
-                return new StringSelectMenuOptionBuilder()
-                    .setLabel(device.length > 100 ? device.substring(0, 97) + '...' : device)
-                    .setValue(device)
-                    .setDescription(`${deviceInfo.screenSize || 6.1}" • ${deviceInfo.refreshRate || 60}Hz`);
-            });
-
-            const deviceSelect = new StringSelectMenuBuilder()
-                .setCustomId('device_final_select')
-                .setPlaceholder('Select your exact device')
-                .addOptions(deviceOptions);
-
-            const row = new ActionRowBuilder().addComponents(deviceSelect);
-
-            await interaction.editReply({
-                content: `Found ${matchingDevices.length} devices matching "${deviceQuery}":`,
-                components: [row]
-            });
-
-        } catch (error) {
-            console.error('Device modal error:', error);
-            await safeInteractionReply(interaction, {
-                content: '❌ An error occurred processing your device.',
-                ephemeral: true
-            });
-        }
-    },
-
-    async handleDeviceFinalSelection(interaction) {
-        try {
-            if (!interaction.isStringSelectMenu()) return;
-            
-            const deviceName = interaction.values[0];
-            const userId = interaction.user.id;
-
-            const linkedUsers = await github.getData('data/linked_users.json') || {};
-            const userData = linkedUsers[userId];
-
-            if (!userData) {
-                await safeInteractionUpdate(interaction, {
-                    content: '❌ Session expired. Please start over with `/sensitivity`',
-                    components: []
-                });
-                return;
-            }
-
-            // Defer the update to buy time for processing
-            await interaction.deferUpdate();
-            
-            await this.generateSensitivity(interaction, deviceName, userData);
-
-        } catch (error) {
-            console.error('Device final selection error:', error);
-            await safeInteractionReply(interaction, {
-                content: '❌ An error occurred generating your sensitivity.',
-                ephemeral: true
             });
         }
     },
@@ -472,19 +462,32 @@ module.exports = {
                 return;
             }
 
-            // Get device info from local database
-            let deviceDatabase;
+            // Try to get device info from API first
+            let deviceInfo = null;
             try {
-                deviceDatabase = require('../data/deviceDatabase').deviceDatabase;
+                const apiDevices = await searchDevicesFromAPI(deviceName);
+                const exactMatch = apiDevices.find(d => d.name === deviceName);
+                if (exactMatch) {
+                    deviceInfo = exactMatch.info;
+                }
             } catch (error) {
-                await safeInteractionReply(interaction, {
-                    content: '❌ Device database not available.',
-                    ephemeral: true
-                });
-                return;
+                console.log('API device lookup failed, using local database');
             }
 
-            const deviceInfo = deviceDatabase[deviceName];
+            // Fallback to local database
+            if (!deviceInfo) {
+                try {
+                    const deviceDatabase = require('../data/deviceDatabase').deviceDatabase;
+                    deviceInfo = deviceDatabase[deviceName];
+                } catch (error) {
+                    await safeInteractionReply(interaction, {
+                        content: '❌ Device database not available.',
+                        ephemeral: true
+                    });
+                    return;
+                }
+            }
+
             if (!deviceInfo) {
                 await safeInteractionReply(interaction, {
                     content: '❌ Device information not found.',
@@ -564,7 +567,7 @@ module.exports = {
                 embed = new EmbedBuilder()
                     .setColor(0xFF4500)
                     .setTitle('🔥 Free Fire Sensitivity')
-                    .setDescription(`**Device:** ${deviceName}\n**Playstyle:** ${playstyle}\n**Account:** ${isVip ? 'VIP 👑' : 'Free'}`)
+                    .setDescription(`**Device:** ${deviceName}\n**Screen:** ${device.screen_size_inches}" • **Refresh:** ${device.refresh_rate_hz}Hz\n**Playstyle:** ${playstyle}\n**Account:** ${isVip ? 'VIP 👑' : 'Free'}`)
                     .addFields(
                         { name: '📱 Camera', value: `${sensitivity.camera}`, inline: true },
                         { name: '🎯 ADS', value: `${sensitivity.ads}`, inline: true },
@@ -578,7 +581,7 @@ module.exports = {
                 embed = new EmbedBuilder()
                     .setColor(0x00FF00)
                     .setTitle('🔫 CODM Sensitivity')
-                    .setDescription(`**Device:** ${deviceName}\n**Fingers:** ${fingers}\n**Playstyle:** ${playstyle}\n**Account:** ${isVip ? 'VIP 👑' : 'Free'}`)
+                    .setDescription(`**Device:** ${deviceName}\n**Screen:** ${device.screen_size_inches}" • **Refresh:** ${device.refresh_rate_hz}Hz\n**Fingers:** ${fingers}\n**Playstyle:** ${playstyle}\n**Account:** ${isVip ? 'VIP 👑' : 'Free'}`)
                     .addFields(
                         { name: '📱 Camera', value: `${sensitivity.camera}`, inline: true },
                         { name: '🎯 ADS', value: `${sensitivity.ads}`, inline: true },
