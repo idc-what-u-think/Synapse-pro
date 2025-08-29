@@ -9,6 +9,43 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 const websiteAPI = new WebsiteAPI();
 
+// Helper function to safely respond to interactions
+async function safeInteractionReply(interaction, options) {
+    try {
+        if (interaction.replied) {
+            return await interaction.editReply(options);
+        } else if (interaction.deferred) {
+            return await interaction.editReply(options);
+        } else {
+            return await interaction.reply(options);
+        }
+    } catch (error) {
+        console.error('Failed to respond to interaction:', error);
+        // If all else fails, try followUp (only works if interaction was acknowledged)
+        if (error.code !== 40060) { // Not "already acknowledged" error
+            try {
+                return await interaction.followUp({ ...options, ephemeral: true });
+            } catch (followUpError) {
+                console.error('Follow-up also failed:', followUpError);
+            }
+        }
+    }
+}
+
+// Helper function to safely update interactions
+async function safeInteractionUpdate(interaction, options) {
+    try {
+        return await interaction.update(options);
+    } catch (error) {
+        console.error('Failed to update interaction:', error);
+        if (error.code === 10062 || error.code === 40060) {
+            // Interaction expired or already acknowledged
+            return await safeInteractionReply(interaction, options);
+        }
+        throw error;
+    }
+}
+
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('sensitivity')
@@ -18,12 +55,14 @@ module.exports = {
         const userId = interaction.user.id;
         
         try {
+            // Acknowledge the interaction immediately
+            await interaction.deferReply({ ephemeral: true });
+
             const linkedUsers = await github.getData('data/linked_users.json') || {};
             
             if (!linkedUsers[userId]) {
-                await interaction.reply({
-                    content: '❌ You need to link your account first using `/login`',
-                    ephemeral: true
+                await interaction.editReply({
+                    content: '❌ You need to link your account first using `/login`'
                 });
                 return;
             }
@@ -37,9 +76,8 @@ module.exports = {
                 .single();
 
             if (userError || !user) {
-                await interaction.reply({
-                    content: '❌ Account verification failed. Please login again with `/login`',
-                    ephemeral: true
+                await interaction.editReply({
+                    content: '❌ Account verification failed. Please login again with `/login`'
                 });
                 return;
             }
@@ -49,9 +87,8 @@ module.exports = {
                 if (user.suspension_reason) {
                     suspensionMessage += `\nReason: ${user.suspension_reason}`;
                 }
-                await interaction.reply({
-                    content: suspensionMessage,
-                    ephemeral: true
+                await interaction.editReply({
+                    content: suspensionMessage
                 });
                 return;
             }
@@ -76,7 +113,7 @@ module.exports = {
             await github.saveData('data/linked_users.json', linkedUsers, 'Update user verification');
 
             const gameSelect = new StringSelectMenuBuilder()
-                .setCustomId('game_select')
+                .setCustomId(`game_select_${userId}_${Date.now()}`) // Unique ID
                 .setPlaceholder('Choose a game')
                 .addOptions(
                     new StringSelectMenuOptionBuilder()
@@ -97,15 +134,14 @@ module.exports = {
             }
             welcomeMessage += ` Select your game:`;
 
-            await interaction.reply({
+            await interaction.editReply({
                 content: welcomeMessage,
-                components: [row],
-                ephemeral: true
+                components: [row]
             });
 
         } catch (error) {
             console.error('Sensitivity command error:', error);
-            await interaction.reply({
+            await safeInteractionReply(interaction, {
                 content: '❌ An error occurred. Please try again.',
                 ephemeral: true
             });
@@ -113,15 +149,18 @@ module.exports = {
     },
 
     async handleGameSelection(interaction) {
-        const game = interaction.values[0];
-        const userId = interaction.user.id;
-
         try {
+            // Check if interaction is valid
+            if (!interaction.isStringSelectMenu()) return;
+            
+            const game = interaction.values[0];
+            const userId = interaction.user.id;
+
             const linkedUsers = await github.getData('data/linked_users.json') || {};
             const userData = linkedUsers[userId];
             
             if (!userData) {
-                await interaction.update({
+                await safeInteractionUpdate(interaction, {
                     content: '❌ Session expired. Please start over with `/sensitivity`',
                     components: []
                 });
@@ -132,7 +171,7 @@ module.exports = {
 
             if (game === 'codm') {
                 const fingerSelect = new StringSelectMenuBuilder()
-                    .setCustomId('finger_select')
+                    .setCustomId(`finger_select_${userId}_${Date.now()}`) // Unique ID
                     .setPlaceholder('How many fingers do you use?')
                     .addOptions(
                         new StringSelectMenuOptionBuilder().setLabel('2 Fingers').setValue('2f'),
@@ -143,7 +182,7 @@ module.exports = {
 
                 const row = new ActionRowBuilder().addComponents(fingerSelect);
 
-                await interaction.update({
+                await safeInteractionUpdate(interaction, {
                     content: 'How many fingers do you play with?',
                     components: [row]
                 });
@@ -165,13 +204,13 @@ module.exports = {
                 }
 
                 const playstyleSelect = new StringSelectMenuBuilder()
-                    .setCustomId('playstyle_select')
+                    .setCustomId(`playstyle_select_${userId}_${Date.now()}`) // Unique ID
                     .setPlaceholder('Choose your playstyle')
                     .addOptions(playstyleOptions);
 
                 const row = new ActionRowBuilder().addComponents(playstyleSelect);
 
-                await interaction.update({
+                await safeInteractionUpdate(interaction, {
                     content: isVip ? 'Choose your playstyle (VIP): 👑' : 'Choose your playstyle (Free - Balanced only):',
                     components: [row]
                 });
@@ -182,7 +221,7 @@ module.exports = {
 
         } catch (error) {
             console.error('Game selection error:', error);
-            await interaction.update({
+            await safeInteractionUpdate(interaction, {
                 content: '❌ An error occurred processing your selection.',
                 components: []
             });
@@ -190,15 +229,17 @@ module.exports = {
     },
 
     async handleFingerSelection(interaction) {
-        const fingers = interaction.values[0];
-        const userId = interaction.user.id;
-
         try {
+            if (!interaction.isStringSelectMenu()) return;
+            
+            const fingers = interaction.values[0];
+            const userId = interaction.user.id;
+
             const linkedUsers = await github.getData('data/linked_users.json') || {};
             const userData = linkedUsers[userId];
             
             if (!userData) {
-                await interaction.update({
+                await safeInteractionUpdate(interaction, {
                     content: '❌ Session expired. Please start over with `/sensitivity`',
                     components: []
                 });
@@ -220,13 +261,13 @@ module.exports = {
             }
 
             const playstyleSelect = new StringSelectMenuBuilder()
-                .setCustomId('playstyle_select')
+                .setCustomId(`playstyle_select_${userId}_${Date.now()}`) // Unique ID
                 .setPlaceholder('Choose your playstyle')
                 .addOptions(playstyleOptions);
 
             const row = new ActionRowBuilder().addComponents(playstyleSelect);
 
-            await interaction.update({
+            await safeInteractionUpdate(interaction, {
                 content: isVip ? `${fingers} selected. Choose your playstyle (VIP): 👑` : `${fingers} selected. Choose your playstyle (Free - Balanced only):`,
                 components: [row]
             });
@@ -236,7 +277,7 @@ module.exports = {
 
         } catch (error) {
             console.error('Finger selection error:', error);
-            await interaction.update({
+            await safeInteractionUpdate(interaction, {
                 content: '❌ An error occurred processing your selection.',
                 components: []
             });
@@ -244,38 +285,52 @@ module.exports = {
     },
 
     async handlePlaystyleSelection(interaction) {
-        const playstyle = interaction.values[0];
+        try {
+            if (!interaction.isStringSelectMenu()) return;
+            
+            const playstyle = interaction.values[0];
+            const userId = interaction.user.id;
 
-        const modal = new ModalBuilder()
-            .setCustomId('device_modal')
-            .setTitle('Enter Your Device');
+            const modal = new ModalBuilder()
+                .setCustomId(`device_modal_${userId}_${Date.now()}`) // Unique ID
+                .setTitle('Enter Your Device');
 
-        const deviceInput = new TextInputBuilder()
-            .setCustomId('device_name')
-            .setLabel('Device Name')
-            .setStyle(TextInputStyle.Short)
-            .setPlaceholder('e.g., iPhone 14, Samsung Galaxy S23')
-            .setRequired(true)
-            .setMaxLength(100);
+            const deviceInput = new TextInputBuilder()
+                .setCustomId('device_name')
+                .setLabel('Device Name')
+                .setStyle(TextInputStyle.Short)
+                .setPlaceholder('e.g., iPhone 14, Samsung Galaxy S23')
+                .setRequired(true)
+                .setMaxLength(100);
 
-        const deviceRow = new ActionRowBuilder().addComponents(deviceInput);
-        modal.addComponents(deviceRow);
+            const deviceRow = new ActionRowBuilder().addComponents(deviceInput);
+            modal.addComponents(deviceRow);
 
-        const userId = interaction.user.id;
-        const linkedUsers = await github.getData('data/linked_users.json') || {};
-        linkedUsers[userId].selectedPlaystyle = playstyle;
-        await github.saveData('data/linked_users.json', linkedUsers, 'Update playstyle selection');
+            const linkedUsers = await github.getData('data/linked_users.json') || {};
+            linkedUsers[userId] = linkedUsers[userId] || {};
+            linkedUsers[userId].selectedPlaystyle = playstyle;
+            await github.saveData('data/linked_users.json', linkedUsers, 'Update playstyle selection');
 
-        await interaction.showModal(modal);
+            await interaction.showModal(modal);
+
+        } catch (error) {
+            console.error('Playstyle selection error:', error);
+            await safeInteractionUpdate(interaction, {
+                content: '❌ An error occurred processing your selection.',
+                components: []
+            });
+        }
     },
 
     async handleDeviceModal(interaction) {
-        await interaction.deferReply({ ephemeral: true });
-
-        const deviceQuery = interaction.fields.getTextInputValue('device_name');
-        const userId = interaction.user.id;
-
         try {
+            if (!interaction.isModalSubmit()) return;
+            
+            await interaction.deferReply({ ephemeral: true });
+
+            const deviceQuery = interaction.fields.getTextInputValue('device_name');
+            const userId = interaction.user.id;
+
             const linkedUsers = await github.getData('data/linked_users.json') || {};
             const userData = linkedUsers[userId];
 
@@ -310,7 +365,7 @@ module.exports = {
             );
 
             const deviceSelect = new StringSelectMenuBuilder()
-                .setCustomId('device_final_select')
+                .setCustomId(`device_final_select_${userId}_${Date.now()}`) // Unique ID
                 .setPlaceholder('Select your exact device')
                 .addOptions(deviceOptions);
 
@@ -323,23 +378,39 @@ module.exports = {
 
         } catch (error) {
             console.error('Device modal error:', error);
-            await interaction.editReply('❌ An error occurred processing your device.');
+            await safeInteractionReply(interaction, {
+                content: '❌ An error occurred processing your device.',
+                ephemeral: true
+            });
         }
     },
 
     async handleDeviceFinalSelection(interaction) {
-        const deviceName = interaction.values[0];
-        const userId = interaction.user.id;
-
         try {
+            if (!interaction.isStringSelectMenu()) return;
+            
+            const deviceName = interaction.values[0];
+            const userId = interaction.user.id;
+
             const linkedUsers = await github.getData('data/linked_users.json') || {};
             const userData = linkedUsers[userId];
 
+            if (!userData) {
+                await safeInteractionUpdate(interaction, {
+                    content: '❌ Session expired. Please start over with `/sensitivity`',
+                    components: []
+                });
+                return;
+            }
+
+            // Defer the update to buy time for processing
+            await interaction.deferUpdate();
+            
             await this.generateSensitivity(interaction, deviceName, userData);
 
         } catch (error) {
             console.error('Device final selection error:', error);
-            await interaction.reply({
+            await safeInteractionReply(interaction, {
                 content: '❌ An error occurred generating your sensitivity.',
                 ephemeral: true
             });
@@ -352,8 +423,10 @@ module.exports = {
             const userCredentials = linkedUsers[interaction.user.id];
             
             if (!userCredentials || !userCredentials.username) {
-                const reply = interaction.replied || interaction.deferred ? 'editReply' : 'reply';
-                await interaction[reply]('❌ User credentials not found. Please login again.');
+                await safeInteractionReply(interaction, {
+                    content: '❌ User credentials not found. Please login again.',
+                    ephemeral: true
+                });
                 return;
             }
 
@@ -364,8 +437,10 @@ module.exports = {
                 .single();
 
             if (userError || !supabaseUser) {
-                const reply = interaction.replied || interaction.deferred ? 'editReply' : 'reply';
-                await interaction[reply]('❌ Could not verify account. Please login again.');
+                await safeInteractionReply(interaction, {
+                    content: '❌ Could not verify account. Please login again.',
+                    ephemeral: true
+                });
                 return;
             }
 
@@ -381,8 +456,10 @@ module.exports = {
             const result = await websiteAPI.calculateSensitivity(sensitivityParams);
 
             if (!result.success) {
-                const reply = interaction.replied || interaction.deferred ? 'editReply' : 'reply';
-                await interaction[reply](`❌ ${result.error}`);
+                await safeInteractionReply(interaction, {
+                    content: `❌ ${result.error}`,
+                    ephemeral: true
+                });
                 return;
             }
 
@@ -422,26 +499,32 @@ module.exports = {
             try {
                 await interaction.user.send({ embeds: [embed] });
                 
-                const reply = interaction.replied || interaction.deferred ? 'editReply' : 'reply';
-                await interaction[reply]('✅ Your sensitivity settings have been sent to your DMs!');
+                await safeInteractionReply(interaction, {
+                    content: '✅ Your sensitivity settings have been sent to your DMs!',
+                    ephemeral: true
+                });
 
             } catch (dmError) {
-                const reply = interaction.replied || interaction.deferred ? 'editReply' : 'reply';
-                await interaction[reply]({ 
+                console.log('Could not send DM, showing embed in channel');
+                await safeInteractionReply(interaction, { 
                     content: '❌ Could not send DM. Please enable DMs from server members.',
-                    embeds: [embed]
+                    embeds: [embed],
+                    ephemeral: true
                 });
             }
 
         } catch (error) {
             console.error('Generate sensitivity error:', error);
-            const reply = interaction.replied || interaction.deferred ? 'editReply' : 'reply';
             
+            let errorMessage = '❌ An error occurred generating your sensitivity.';
             if (error.response?.data?.error) {
-                await interaction[reply](`❌ ${error.response.data.error}`);
-            } else {
-                await interaction[reply]('❌ An error occurred generating your sensitivity.');
+                errorMessage = `❌ ${error.response.data.error}`;
             }
+
+            await safeInteractionReply(interaction, {
+                content: errorMessage,
+                ephemeral: true
+            });
         }
     }
 };
