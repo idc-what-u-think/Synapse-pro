@@ -199,8 +199,33 @@ for (const file of eventFiles) {
     }
 }
 
-// Improved interaction handler
+// Enhanced interaction handler with autocomplete support
 client.on('interactionCreate', async interaction => {
+    // Handle autocomplete interactions (NEW)
+    if (interaction.isAutocomplete()) {
+        const command = client.commands.get(interaction.commandName);
+        
+        if (!command) {
+            console.error(`No command matching ${interaction.commandName} was found for autocomplete.`);
+            return;
+        }
+
+        try {
+            if (command.autocomplete) {
+                await command.autocomplete(interaction);
+            }
+        } catch (error) {
+            console.error('Autocomplete error:', error);
+            // Always respond to prevent Discord errors
+            try {
+                await interaction.respond([]);
+            } catch (respondError) {
+                console.error('Failed to respond to autocomplete:', respondError);
+            }
+        }
+        return;
+    }
+
     // Handle slash commands
     if (interaction.isChatInputCommand()) {
         const command = client.commands.get(interaction.commandName);
