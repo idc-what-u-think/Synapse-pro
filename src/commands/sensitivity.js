@@ -2,16 +2,11 @@ const { SlashCommandBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuil
 const { createClient } = require('@supabase/supabase-js');
 const { WebsiteAPI } = require('../utils/websiteAPI');
 const github = require('../utils/github');
-const fetch = require('node-fetch'); // Make sure to install: npm install node-fetch
-
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 const websiteAPI = new WebsiteAPI();
-
-// Your API base URL
-const API_BASE_URL = process.env.WEBSITE_API_URL || 'https://your-website.com'; // Add this to your .env
 
 // Helper function to safely respond to interactions
 async function safeInteractionReply(interaction, options) {
@@ -48,20 +43,18 @@ async function safeInteractionUpdate(interaction, options) {
     }
 }
 
-// Device search function using your API
+// Device search function using your WebsiteAPI class
 async function searchDevicesFromAPI(query) {
     try {
         if (!query || query.length < 1) return [];
         
-        const response = await fetch(`${API_BASE_URL}/api/devices/search?q=${encodeURIComponent(query)}`);
+        const result = await websiteAPI.searchDevices(query);
         
-        if (!response.ok) {
-            console.error('API request failed:', response.status);
-            return [];
+        if (result.success && result.data && result.data.devices) {
+            return result.data.devices;
         }
         
-        const data = await response.json();
-        return data.devices || [];
+        return [];
     } catch (error) {
         console.error('Device search API error:', error);
         return [];
@@ -465,10 +458,12 @@ module.exports = {
             // Try to get device info from API first
             let deviceInfo = null;
             try {
-                const apiDevices = await searchDevicesFromAPI(deviceName);
-                const exactMatch = apiDevices.find(d => d.name === deviceName);
-                if (exactMatch) {
-                    deviceInfo = exactMatch.info;
+                const apiResult = await websiteAPI.searchDevices(deviceName);
+                if (apiResult.success && apiResult.data && apiResult.data.devices) {
+                    const exactMatch = apiResult.data.devices.find(d => d.name === deviceName);
+                    if (exactMatch) {
+                        deviceInfo = exactMatch.info;
+                    }
                 }
             } catch (error) {
                 console.log('API device lookup failed, using local database');
