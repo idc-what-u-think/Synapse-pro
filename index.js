@@ -199,7 +199,9 @@ for (const file of eventFiles) {
     }
 }
 
+// Improved interaction handler
 client.on('interactionCreate', async interaction => {
+    // Handle slash commands
     if (interaction.isChatInputCommand()) {
         const command = client.commands.get(interaction.commandName);
         if (!command) return;
@@ -207,64 +209,96 @@ client.on('interactionCreate', async interaction => {
         try {
             await command.execute(interaction);
         } catch (error) {
-            console.error(`Command ${interaction.commandName} error:`, error.message);
+            console.error(`Command ${interaction.commandName} error:`, error);
+            
             const errorMessage = {
-                content: 'There was an error executing this command!',
+                content: '❌ There was an error executing this command!',
                 ephemeral: true
             };
-            if (interaction.replied || interaction.deferred) {
-                await interaction.followUp(errorMessage);
-            } else {
-                await interaction.reply(errorMessage);
+
+            try {
+                if (interaction.replied) {
+                    await interaction.followUp(errorMessage);
+                } else if (interaction.deferred) {
+                    await interaction.editReply(errorMessage);
+                } else {
+                    await interaction.reply(errorMessage);
+                }
+            } catch (replyError) {
+                console.error('Failed to send command error reply:', replyError);
             }
         }
     }
     
-    if (interaction.isModalSubmit()) {
+    // Handle modal submissions
+    else if (interaction.isModalSubmit()) {
         try {
-            if (interaction.customId === 'login_modal') {
+            const customId = interaction.customId;
+            
+            if (customId === 'login_modal') {
                 const loginHandler = require('./src/commands/login');
                 await loginHandler.handleLoginModal(interaction);
-            } else if (interaction.customId === 'device_modal') {
+            } 
+            else if (customId.startsWith('device_modal_') || customId === 'device_modal') {
                 const sensitivityHandler = require('./src/commands/sensitivity');
                 await sensitivityHandler.handleDeviceModal(interaction);
             }
+            else {
+                console.log(`Unhandled modal: ${customId}`);
+            }
         } catch (error) {
-            console.error('Modal interaction error:', error.message);
-            if (!interaction.replied && !interaction.deferred) {
-                await interaction.reply({ 
-                    content: 'There was an error processing this form!', 
-                    ephemeral: true 
-                });
+            console.error('Modal interaction error:', error);
+            
+            try {
+                if (!interaction.replied && !interaction.deferred) {
+                    await interaction.reply({ 
+                        content: '❌ There was an error processing this form!', 
+                        ephemeral: true 
+                    });
+                }
+            } catch (replyError) {
+                console.error('Failed to send modal error reply:', replyError);
             }
         }
     }
 
-    if (interaction.isStringSelectMenu()) {
+    // Handle string select menus
+    else if (interaction.isStringSelectMenu()) {
         try {
-            const sensitivityHandler = require('./src/commands/sensitivity');
+            const customId = interaction.customId;
             
-            switch (interaction.customId) {
-                case 'game_select':
-                    await sensitivityHandler.handleGameSelection(interaction);
-                    break;
-                case 'finger_select':
-                    await sensitivityHandler.handleFingerSelection(interaction);
-                    break;
-                case 'playstyle_select':
-                    await sensitivityHandler.handlePlaystyleSelection(interaction);
-                    break;
-                case 'device_final_select':
-                    await sensitivityHandler.handleDeviceFinalSelection(interaction);
-                    break;
+            // Route sensitivity command interactions
+            if (customId.startsWith('game_select') || customId === 'game_select') {
+                const sensitivityHandler = require('./src/commands/sensitivity');
+                await sensitivityHandler.handleGameSelection(interaction);
+            }
+            else if (customId.startsWith('finger_select') || customId === 'finger_select') {
+                const sensitivityHandler = require('./src/commands/sensitivity');
+                await sensitivityHandler.handleFingerSelection(interaction);
+            }
+            else if (customId.startsWith('playstyle_select') || customId === 'playstyle_select') {
+                const sensitivityHandler = require('./src/commands/sensitivity');
+                await sensitivityHandler.handlePlaystyleSelection(interaction);
+            }
+            else if (customId.startsWith('device_final_select') || customId === 'device_final_select') {
+                const sensitivityHandler = require('./src/commands/sensitivity');
+                await sensitivityHandler.handleDeviceFinalSelection(interaction);
+            }
+            else {
+                console.log(`Unhandled select menu: ${customId}`);
             }
         } catch (error) {
-            console.error('Select menu interaction error:', error.message);
-            if (!interaction.replied && !interaction.deferred) {
-                await interaction.reply({ 
-                    content: 'There was an error processing your selection!', 
-                    ephemeral: true 
-                });
+            console.error('Select menu interaction error:', error);
+            
+            try {
+                if (!interaction.replied && !interaction.deferred) {
+                    await interaction.reply({ 
+                        content: '❌ There was an error processing your selection!', 
+                        ephemeral: true 
+                    });
+                }
+            } catch (replyError) {
+                console.error('Failed to send select menu error reply:', replyError);
             }
         }
     }
@@ -286,11 +320,11 @@ client.once('ready', async () => {
 });
 
 client.on('error', error => {
-    console.error('Discord error:', error.message);
+    console.error('Discord error:', error);
 });
 
 process.on('unhandledRejection', error => {
-    console.error('Promise rejection:', error.message);
+    console.error('Promise rejection:', error);
 });
 
 process.on('SIGINT', () => {
