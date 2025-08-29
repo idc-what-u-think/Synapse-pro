@@ -3,12 +3,10 @@ const { createClient } = require('@supabase/supabase-js');
 const { WebsiteAPI } = require('../utils/websiteAPI');
 const github = require('../utils/github');
 
-// Initialize Supabase client
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// Keep WebsiteAPI for device search and sensitivity calculation only
 const websiteAPI = new WebsiteAPI();
 
 module.exports = {
@@ -32,7 +30,6 @@ module.exports = {
 
             const userData = linkedUsers[userId];
 
-            // Query Supabase directly to get fresh user data
             const { data: user, error: userError } = await supabase
                 .from('users')
                 .select('*')
@@ -47,7 +44,6 @@ module.exports = {
                 return;
             }
 
-            // Check if user is suspended
             if (user.suspended_at) {
                 let suspensionMessage = '❌ Your account is suspended';
                 if (user.suspension_reason) {
@@ -60,7 +56,6 @@ module.exports = {
                 return;
             }
 
-            // Check and update VIP status
             let vipStatus = 'Regular';
             if (user.vip_expires_at) {
                 const vipExpiry = new Date(user.vip_expires_at);
@@ -71,7 +66,6 @@ module.exports = {
                 }
             }
 
-            // Update stored user data with fresh info
             linkedUsers[userId] = {
                 ...linkedUsers[userId],
                 role: user.role,
@@ -134,7 +128,6 @@ module.exports = {
                 return;
             }
 
-            // Check VIP status for features
             const isVip = userData.vipStatus === 'VIP';
 
             if (game === 'codm') {
@@ -298,8 +291,7 @@ module.exports = {
                 return;
             }
 
-            // Your API returns devices with nested structure: { name, info }
-            const matchingDevices = searchResult.data.devices.map(d => d.name);
+            const matchingDevices = searchResult.devices.map(d => d.name);
 
             if (matchingDevices.length === 0) {
                 await interaction.editReply(`❌ No devices found matching "${deviceQuery}". Please try a different search term.`);
@@ -365,7 +357,6 @@ module.exports = {
                 return;
             }
 
-            // Get user's password from Supabase for API authentication
             const { data: supabaseUser, error: userError } = await supabase
                 .from('users')
                 .select('password_hash')
@@ -378,17 +369,15 @@ module.exports = {
                 return;
             }
 
-            // Prepare API request parameters
             const sensitivityParams = {
                 username: userCredentials.username,
-                password: supabaseUser.password_hash, // Use actual password from database
+                password: supabaseUser.password_hash,
                 game: userData.selectedGame,
                 device: deviceName,
                 playstyle: userData.selectedPlaystyle,
                 ...(userData.selectedFingers && { fingers: userData.selectedFingers })
             };
 
-            // Call your website's sensitivity calculation API
             const result = await websiteAPI.calculateSensitivity(sensitivityParams);
 
             if (!result.success) {
@@ -397,7 +386,6 @@ module.exports = {
                 return;
             }
 
-            // Your API returns: { success: true, data: { sensitivity, user, game, device, playstyle, fingers } }
             const { sensitivity, user, game, device, playstyle, fingers } = result.data;
             const isVip = user.role === 'vip' || user.role === 'admin';
             let embed;
