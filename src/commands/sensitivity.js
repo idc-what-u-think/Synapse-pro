@@ -291,7 +291,7 @@ module.exports = {
                 return;
             }
 
-            const matchingDevices = searchResult.devices.map(d => d.name);
+            const matchingDevices = searchResult.data.devices.map(d => d.name);
 
             if (matchingDevices.length === 0) {
                 await interaction.editReply(`❌ No devices found matching "${deviceQuery}". Please try a different search term.`);
