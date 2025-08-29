@@ -1,6 +1,16 @@
-const { Events, PermissionFlagsBits } = require('discord.js');
+const { Events, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { getConfig, getLevels, saveLevels } = require('../utils/github');
 const { getLevel } = require('../utils/xp');
+
+// Initialize Gemini AI
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+
+// AI Rate limiting storage
+const rateLimits = new Map();
+const RATE_LIMIT_REQUESTS = 10; // 10 requests per minute
+const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute in milliseconds
 
 // URL detection regex patterns
 const URL_PATTERNS = [
@@ -60,6 +70,9 @@ module.exports = {
             const wordFiltered = await handleWordFiltering(message, config);
             if (wordFiltered) return; // Don't process further if message was deleted
             
+            // Handle AI responses (NEW)
+            await handleAIMessage(message, config);
+            
             // Handle XP/leveling system (only if message wasn't deleted)
             await handleLeveling(message);
             
@@ -68,6 +81,147 @@ module.exports = {
         }
     },
 };
+
+// AI Message Handler (NEW)
+async function handleAIMessage(message, config) {
+    const guildId = message.guild.id;
+    const userId = message.author.id;
+    const channelId = message.channel.id;
+
+    try {
+        // Get guild config (config already loaded in main function)
+        const guildConfig = config[guildId] || {};
+
+        // Check maintenance mode
+        if (guildConfig.maintenanceMode) {
+            const member = message.member;
+            const isAdmin = member.permissions.has(PermissionFlagsBits.Administrator);
+            
+            if (!isAdmin) {
+                return; // Don't respond to non-admins in maintenance mode
+            }
+        }
+
+        // Check if should respond
+        let shouldRespond = false;
+        const botMention = `<@${message.client.user.id}>`;
+        const isTagged = message.content.includes(botMention);
+
+        if (guildConfig.aiChannel) {
+            // AI channel is configured
+            if (channelId === guildConfig.aiChannel) {
+                shouldRespond = true; // Always respond in AI channel
+            } else if (isTagged) {
+                // Only respond if tagged by admin in other channels
+                const member = message.member;
+                const isAdmin = member.permissions.has(PermissionFlagsBits.ManageGuild);
+                shouldRespond = isAdmin;
+            }
+        } else {
+            // No AI channel configured, only respond when tagged
+            if (isTagged) {
+                shouldRespond = true;
+            }
+        }
+
+        if (!shouldRespond) return;
+
+        // Rate limiting
+        const now = Date.now();
+        const userLimits = rateLimits.get(userId) || { requests: [] };
+        
+        // Clean old requests
+        userLimits.requests = userLimits.requests.filter(time => now - time < RATE_LIMIT_WINDOW);
+        
+        // Check rate limit
+        if (userLimits.requests.length >= RATE_LIMIT_REQUESTS) {
+            const embed = new EmbedBuilder()
+                .setColor(0xFF9900)
+                .setDescription('⏰ **Rate limit exceeded!** Please wait a moment before asking again.');
+            
+            return message.reply({ embeds: [embed] });
+        }
+
+        // Add current request to rate limit tracking
+        userLimits.requests.push(now);
+        rateLimits.set(userId, userLimits);
+
+        // Show typing indicator
+        message.channel.sendTyping();
+
+        // Clean the prompt (remove bot mention if present)
+        let prompt = message.content.replace(botMention, '').trim();
+        
+        if (!prompt) {
+            const embed = new EmbedBuilder()
+                .setColor(0x4285F4)
+                .setDescription('👋 **Hi there!** Ask me anything or upload an image for me to analyze!');
+            
+            return message.reply({ embeds: [embed] });
+        }
+
+        // Handle attachments (images)
+        let result;
+        const imageAttachment = message.attachments.find(att => att.contentType?.startsWith('image/'));
+
+        if (imageAttachment) {
+            // Handle image + text input
+            const response = await fetch(imageAttachment.url);
+            const imageBuffer = await response.arrayBuffer();
+            const imageData = {
+                inlineData: {
+                    data: Buffer.from(imageBuffer).toString('base64'),
+                    mimeType: imageAttachment.contentType
+                }
+            };
+
+            result = await model.generateContent([prompt, imageData]);
+        } else {
+            // Handle text-only input
+            result = await model.generateContent(prompt);
+        }
+
+        const responseText = result.response.text();
+        
+        // Handle long responses
+        if (responseText.length > 1900) {
+            const embed = new EmbedBuilder()
+                .setColor(0x4285F4)
+                .setDescription(responseText.substring(0, 1900) + '...')
+                .setFooter({ text: 'Response truncated due to Discord limits' });
+
+            await message.reply({ embeds: [embed] });
+            
+            // Send remaining text
+            const remaining = responseText.substring(1900);
+            if (remaining.length > 0) {
+                await message.channel.send(remaining.substring(0, 1900));
+            }
+        } else {
+            // Normal response
+            await message.reply(responseText);
+        }
+
+    } catch (error) {
+        console.error('AI Message Error:', error);
+
+        let errorMessage = '❌ **An error occurred while processing your request.**';
+
+        if (error.message?.includes('quota')) {
+            errorMessage = '⚠️ **Quota exceeded!** Please try again later.';
+        } else if (error.message?.includes('rate limit')) {
+            errorMessage = '⏰ **Rate limit hit!** Please wait a moment.';
+        } else if (error.message?.includes('blocked')) {
+            errorMessage = '🚫 **Content blocked!** Your request was flagged by safety filters.';
+        }
+
+        const embed = new EmbedBuilder()
+            .setColor(0xFF0000)
+            .setDescription(errorMessage);
+
+        await message.reply({ embeds: [embed] });
+    }
+}
 
 async function handleAntilink(message, config) {
     try {
