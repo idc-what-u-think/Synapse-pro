@@ -5,8 +5,8 @@ const {
   ComponentType
 } = require('discord.js');
 const { deviceDatabase } = require('../data/deviceDatabase');
-const { websiteAPI } = require('../utils/websiteAPI');
-const { ResultFormatter } = require('../utils/formatters');
+const { WebsiteAPI } = require('./websiteAPI');
+const { ResultFormatter } = require('./formatters');
 const { Game, PlayStyle, ExperienceLevel, FingerCount } = require('../types/gameEnums');
 
 class SensitivityHandler {
@@ -82,13 +82,13 @@ class SensitivityHandler {
 
       this.deviceName = selected.values[0];
       await selected.update({ 
-        content: `✅ Selected device: **${this.deviceName}**`, 
+        content: `Selected device: **${this.deviceName}**`, 
         components: [] 
       });
     } catch (error) {
       if (error.code === 'INTERACTION_COLLECTOR_ERROR') {
         await this.interaction.editReply({
-          content: '⏱️ Selection timed out. Please run the command again.',
+          content: 'Selection timed out. Please run the command again.',
           components: []
         });
         throw new Error('Selection timed out');
@@ -112,7 +112,7 @@ class SensitivityHandler {
       .addComponents(styleMenu);
 
     const response = await this.interaction.editReply({
-      content: '🎮 Select your play style:',
+      content: 'Select your play style:',
       components: [row]
     });
 
@@ -125,13 +125,13 @@ class SensitivityHandler {
 
       this.playStyle = selected.values[0];
       await selected.update({ 
-        content: `✅ Play style: **${this.playStyle}**`, 
+        content: `Play style: **${this.playStyle}**`, 
         components: [] 
       });
     } catch (error) {
       if (error.code === 'INTERACTION_COLLECTOR_ERROR') {
         await this.interaction.editReply({
-          content: '⏱️ Selection timed out. Please run the command again.',
+          content: 'Selection timed out. Please run the command again.',
           components: []
         });
         throw new Error('Selection timed out');
@@ -155,7 +155,7 @@ class SensitivityHandler {
       .addComponents(expMenu);
 
     const response = await this.interaction.editReply({
-      content: '📈 Select your experience level:',
+      content: 'Select your experience level:',
       components: [row]
     });
 
@@ -168,13 +168,13 @@ class SensitivityHandler {
 
       this.experienceLevel = selected.values[0];
       await selected.update({ 
-        content: `✅ Experience level: **${this.experienceLevel}**`, 
+        content: `Experience level: **${this.experienceLevel}**`, 
         components: [] 
       });
     } catch (error) {
       if (error.code === 'INTERACTION_COLLECTOR_ERROR') {
         await this.interaction.editReply({
-          content: '⏱️ Selection timed out. Please run the command again.',
+          content: 'Selection timed out. Please run the command again.',
           components: []
         });
         throw new Error('Selection timed out');
@@ -198,7 +198,7 @@ class SensitivityHandler {
       .addComponents(fingerMenu);
 
     const response = await this.interaction.editReply({
-      content: '✋ How many fingers do you use to play?',
+      content: 'How many fingers do you use to play?',
       components: [row]
     });
 
@@ -211,13 +211,13 @@ class SensitivityHandler {
 
       this.fingerCount = selected.values[0];
       await selected.update({ 
-        content: `✅ Selected control: **${this.fingerCount}**`, 
+        content: `Selected control: **${this.fingerCount}**`, 
         components: [] 
       });
     } catch (error) {
       if (error.code === 'INTERACTION_COLLECTOR_ERROR') {
         await this.interaction.editReply({
-          content: '⏱️ Selection timed out. Please run the command again.',
+          content: 'Selection timed out. Please run the command again.',
           components: []
         });
         throw new Error('Selection timed out');
@@ -230,32 +230,32 @@ class SensitivityHandler {
     if (!this.deviceName) throw new Error('Device not selected');
     
     try {
-      // Get device details from API
-      const deviceResponse = await this.api.getDeviceDetails([this.deviceName]);
-      if (!deviceResponse.success) {
-        throw new Error('Failed to fetch device details');
+      // Get device from local database
+      const device = deviceDatabase[this.deviceName];
+      if (!device) {
+        throw new Error('Device not found in database');
       }
-      const device = deviceResponse.data[0];
 
-      // Calculate settings via API
-      const params = {
-        game: this.game,
-        device: this.deviceName,
-        playstyle: this.playStyle,
-        fingers: this.fingerCount
+      // Add device name to the device object if it's missing
+      const deviceWithName = {
+        name: this.deviceName,
+        ...device
       };
 
-      const result = await this.api.calculateSensitivity(params);
-      if (!result.success) {
-        throw new Error('Failed to calculate sensitivity');
+      // Calculate settings using static methods
+      let settings;
+      if (this.game === 'FF') {
+        settings = WebsiteAPI.calculateFFSensitivity(deviceWithName, this.playStyle, this.experienceLevel);
+      } else {
+        settings = WebsiteAPI.calculateCODMSensitivity(deviceWithName, this.fingerCount);
       }
 
       // Create embed with results
       let embed;
       if (this.game === 'FF') {
-        embed = ResultFormatter.createFFEmbed(device, result.data, this.playStyle, this.experienceLevel);
+        embed = ResultFormatter.createFFEmbed(deviceWithName, settings, this.playStyle, this.experienceLevel);
       } else {
-        embed = ResultFormatter.createCODMEmbed(device, result.data, this.fingerCount);
+        embed = ResultFormatter.createCODMEmbed(deviceWithName, settings, this.fingerCount);
       }
 
       const buttons = ResultFormatter.createButtons();
@@ -299,18 +299,24 @@ class SensitivityHandler {
     const device = deviceDatabase[this.deviceName];
     if (!device) return 'Device not found';
 
+    // Add device name to the device object
+    const deviceWithName = {
+      name: this.deviceName,
+      ...device
+    };
+
     let settings;
     let additionalInfo = {};
 
     if (this.game === 'FF') {
-      settings = WebsiteAPI.calculateFFSensitivity(device, this.playStyle, this.experienceLevel);
+      settings = WebsiteAPI.calculateFFSensitivity(deviceWithName, this.playStyle, this.experienceLevel);
       additionalInfo = { playStyle: this.playStyle, experienceLevel: this.experienceLevel };
     } else {
-      settings = WebsiteAPI.calculateCODMSensitivity(device, this.fingerCount);
+      settings = WebsiteAPI.calculateCODMSensitivity(deviceWithName, this.fingerCount);
       additionalInfo = { fingerCount: this.fingerCount, mode: 'mp' };
     }
 
-    return ResultFormatter.createSettingsText(device, settings, this.game, additionalInfo);
+    return ResultFormatter.createSettingsText(deviceWithName, settings, this.game, additionalInfo);
   }
 }
 
