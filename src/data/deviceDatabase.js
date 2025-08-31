@@ -1,6 +1,4 @@
-import { DeviceDatabase } from '../types';
-
-export const deviceDatabase: DeviceDatabase = {
+const deviceDatabase = {
   // Apple devices
   "iPhone X": {
     screenSize: 5.8,
