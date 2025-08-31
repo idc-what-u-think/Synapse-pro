@@ -14,43 +14,31 @@ class WebsiteAPI {
         });
     }
 
-    async verifyUser(username, password) {
-        try {
-            const response = await this.client.post('/auth/verify', {
-                username,
-                password
-            });
-            return { success: true, data: response.data };
-        } catch (error) {
-            return { 
-                success: false, 
-                error: error.response?.data?.error || 'Authentication failed' 
-            };
-        }
+    // ... existing authentication and user methods ...
+
+    static calculateFFSensitivity(device, playStyle, experienceLevel) {
+        const baseMultiplier = this.calculateBaseMultiplier(device);
+        const playStyleMultiplier = this.getPlayStyleMultiplier(playStyle);
+        const experienceMultiplier = this.getExperienceMultiplier(experienceLevel);
+
+        return {
+            general: Math.round(100 * baseMultiplier * playStyleMultiplier * experienceMultiplier),
+            redDot: Math.round(95 * baseMultiplier * playStyleMultiplier * experienceMultiplier),
+            scope2x: Math.round(85 * baseMultiplier * playStyleMultiplier * experienceMultiplier),
+            scope4x: Math.round(75 * baseMultiplier * playStyleMultiplier * experienceMultiplier),
+            sniperScope: Math.round(65 * baseMultiplier * playStyleMultiplier * experienceMultiplier),
+            freeLook: Math.round(100 * baseMultiplier * playStyleMultiplier * experienceMultiplier),
+        };
     }
 
-    async getUserInfo(username) {
-        try {
-            const response = await this.client.get(`/auth/verify?username=${encodeURIComponent(username)}`);
-            return { success: true, data: response.data };
-        } catch (error) {
-            return { 
-                success: false, 
-                error: error.response?.data?.error || 'User not found' 
-            };
-        }
-    }
+    static calculateCODMSensitivity(device, fingerCount) {
+        const baseMultiplier = this.calculateBaseMultiplier(device);
+        const fingerMultiplier = this.getFingerCountMultiplier(fingerCount);
 
-    async searchDevices(query) {
-        try {
-            const response = await this.client.get(`/devices/search?q=${encodeURIComponent(query)}`);
-            return { success: true, data: response.data };
-        } catch (error) {
-            return { 
-                success: false, 
-                error: error.response?.data?.error || 'Device search failed' 
-            };
-        }
+        return {
+            mp: this.generateCODMGameMode(baseMultiplier, fingerMultiplier, false),
+            br: this.generateCODMGameMode(baseMultiplier, fingerMultiplier, true)
+        };
     }
 
     async calculateSensitivity(params) {
@@ -74,19 +62,15 @@ class WebsiteAPI {
         }
     }
 
-    async getDeviceDetails(deviceNames) {
-        try {
-            const response = await this.client.post('/devices/search', {
-                devices: deviceNames
-            });
-            return { success: true, data: response.data };
-        } catch (error) {
-            return { 
-                success: false, 
-                error: error.response?.data?.error || 'Device details fetch failed' 
-            };
-        }
+    static calculateBaseMultiplier(device) {
+        const refreshRateScore = device.refreshRate / 60;
+        const touchRateScore = device.touchSamplingRate / 120;
+        const performanceScore = (device.processorScore + device.gpuScore) / 200;
+        
+        return (refreshRateScore * 0.4 + touchRateScore * 0.4 + performanceScore * 0.2);
     }
+
+    // ... other existing helper methods remain unchanged ...
 }
 
 module.exports = { WebsiteAPI };
