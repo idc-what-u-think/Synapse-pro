@@ -5,8 +5,8 @@ const {
   ComponentType
 } = require('discord.js');
 const { deviceDatabase } = require('../data/deviceDatabase');
-const { WebsiteAPI } = require('./WebsiteAPI');
-const { ResultFormatter } = require('./formatter');
+const { WebsiteAPI } = require('../utils/WebsiteAPI');
+const { ResultFormatter } = require('../utils/formatter');
 const { Game, PlayStyle, ExperienceLevel, FingerCount } = require('../types/gameEnums');
 
 class SensitivityHandler {
