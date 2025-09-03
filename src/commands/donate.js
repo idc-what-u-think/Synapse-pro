@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { addToBank, updateBankMessage } = require('../utils/bankManager');
-const { getUserBalance, updateUserBalance } = require('../utils/economy');
+const { getUserBalance, addUserBalance } = require('../utils/economy'); // Changed updateUserBalance to addUserBalance
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -11,10 +11,8 @@ module.exports = {
                 .setDescription('Amount of coins to donate')
                 .setRequired(true)
                 .setMinValue(1)),
-
     async execute(interaction) {
         await interaction.deferReply();
-
         try {
             const amount = interaction.options.getInteger('amount');
             const userId = interaction.user.id;
@@ -34,8 +32,9 @@ module.exports = {
                 
                 return await interaction.editReply({ embeds: [embed] });
             }
-
-            await updateUserBalance(userId, -amount, `Donation to server trust fund`);
+            
+            // Use addUserBalance with negative amount to deduct coins
+            await addUserBalance(userId, -amount, `Donation to server trust fund`);
             
             const newBankBalance = await addToBank(
                 amount,
@@ -43,7 +42,7 @@ module.exports = {
                 userId,
                 username
             );
-
+            
             const embed = new EmbedBuilder()
                 .setColor(0x00FF00)
                 .setTitle('Donation Successful! 💖')
@@ -55,11 +54,10 @@ module.exports = {
                 )
                 .setFooter({ text: 'Your contribution helps fund server activities and rewards!' })
                 .setTimestamp();
-
+            
             await interaction.editReply({ embeds: [embed] });
             
             await updateBankMessage(interaction.client);
-
         } catch (error) {
             console.error('Donate command error:', error);
             
@@ -67,7 +65,7 @@ module.exports = {
                 .setColor(0xFF0000)
                 .setTitle('Donation Failed')
                 .setDescription('An error occurred while processing your donation. Please try again.');
-
+            
             if (!interaction.replied) {
                 await interaction.editReply({ embeds: [embed] });
             }
