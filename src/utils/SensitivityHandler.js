@@ -17,7 +17,7 @@ class SensitivityHandler {
     this.playStyle = null;
     this.experienceLevel = null;
     this.fingerCount = null;
-    this.api = new WebsiteAPI(); // Add API initialization
+    this.api = new WebsiteAPI();
   }
 
   async handle() {
@@ -35,7 +35,6 @@ class SensitivityHandler {
     } catch (error) {
       console.error('Error in sensitivity handler:', error);
       
-      // Check if interaction is still valid
       try {
         await this.interaction.editReply({
           content: 'There was an error processing your request. Please try again.',
@@ -48,6 +47,9 @@ class SensitivityHandler {
   }
 
   async selectDevice() {
+    // Debug: Log available devices
+    console.log('Available devices in database:', Object.keys(deviceDatabase));
+    
     const deviceNames = Object.keys(deviceDatabase);
     
     if (deviceNames.length === 0) {
@@ -59,17 +61,16 @@ class SensitivityHandler {
       value: device
     }));
 
-    // Split options if too many (Discord has a 25 option limit)
     const deviceMenu = new StringSelectMenuBuilder()
       .setCustomId('device_select')
       .setPlaceholder('Select your device')
-      .addOptions(deviceOptions.slice(0, 25)); // Limit to 25 options
+      .addOptions(deviceOptions.slice(0, 25));
 
     const row = new ActionRowBuilder()
       .addComponents(deviceMenu);
 
     const response = await this.interaction.editReply({
-      content: `Let's configure your ${Game[this.game]} sensitivity settings. First, select your device:`,
+      content: `Let's configure your ${Game[this.game] || this.game} sensitivity settings. First, select your device:`,
       components: [row]
     });
 
@@ -81,6 +82,11 @@ class SensitivityHandler {
       });
 
       this.deviceName = selected.values[0];
+      
+      // Debug: Log selected device
+      console.log('Selected device name:', this.deviceName);
+      console.log('Device exists in database:', !!deviceDatabase[this.deviceName]);
+      
       await selected.update({ 
         content: `Selected device: **${this.deviceName}**`, 
         components: [] 
@@ -227,34 +233,61 @@ class SensitivityHandler {
   }
 
   async generateResults() {
-    if (!this.deviceName) throw new Error('Device not selected');
+    if (!this.deviceName) {
+      throw new Error('Device not selected');
+    }
     
     try {
+      // Debug logging
+      console.log('=== DEBUG INFO ===');
+      console.log('Device name:', this.deviceName);
+      console.log('Device name type:', typeof this.deviceName);
+      console.log('Device database keys:', Object.keys(deviceDatabase));
+      
       // Get device from local database
       const device = deviceDatabase[this.deviceName];
+      console.log('Retrieved device object:', device);
+      console.log('Device is undefined?', device === undefined);
+      console.log('Device is null?', device === null);
+      
       if (!device) {
-        throw new Error('Device not found in database');
+        console.error(`Device "${this.deviceName}" not found in database`);
+        console.log('Available devices:', Object.keys(deviceDatabase).join(', '));
+        throw new Error(`Device "${this.deviceName}" not found in database`);
       }
 
-      // Add device name to the device object if it's missing
+      // Create device object with name
       const deviceWithName = {
         name: this.deviceName,
         ...device
       };
+      
+      console.log('Device with name:', deviceWithName);
+      console.log('Device with name has name property?', !!deviceWithName.name);
 
       // Calculate settings using static methods
       let settings;
       if (this.game === 'FF') {
+        console.log('Calculating FF settings...');
         settings = WebsiteAPI.calculateFFSensitivity(deviceWithName, this.playStyle, this.experienceLevel);
       } else {
+        console.log('Calculating CODM settings...');
         settings = WebsiteAPI.calculateCODMSensitivity(deviceWithName, this.fingerCount);
+      }
+      
+      console.log('Generated settings:', settings);
+
+      if (!settings) {
+        throw new Error('Failed to generate sensitivity settings');
       }
 
       // Create embed with results
       let embed;
       if (this.game === 'FF') {
+        console.log('Creating FF embed...');
         embed = ResultFormatter.createFFEmbed(deviceWithName, settings, this.playStyle, this.experienceLevel);
       } else {
+        console.log('Creating CODM embed...');
         embed = ResultFormatter.createCODMEmbed(deviceWithName, settings, this.fingerCount);
       }
 
@@ -268,11 +301,17 @@ class SensitivityHandler {
 
     } catch (error) {
       console.error('Error generating results:', error);
+      console.error('Error stack:', error.stack);
+      
+      await this.interaction.editReply({
+        content: `Error: ${error.message}. Please check the console logs and try again.`,
+        components: []
+      });
       throw error;
     }
   }
 
-  // Getter methods for accessing private properties (for button handlers)
+  // Getter methods remain the same
   getDeviceName() {
     return this.deviceName;
   }
@@ -299,7 +338,6 @@ class SensitivityHandler {
     const device = deviceDatabase[this.deviceName];
     if (!device) return 'Device not found';
 
-    // Add device name to the device object
     const deviceWithName = {
       name: this.deviceName,
       ...device
@@ -308,15 +346,20 @@ class SensitivityHandler {
     let settings;
     let additionalInfo = {};
 
-    if (this.game === 'FF') {
-      settings = WebsiteAPI.calculateFFSensitivity(deviceWithName, this.playStyle, this.experienceLevel);
-      additionalInfo = { playStyle: this.playStyle, experienceLevel: this.experienceLevel };
-    } else {
-      settings = WebsiteAPI.calculateCODMSensitivity(deviceWithName, this.fingerCount);
-      additionalInfo = { fingerCount: this.fingerCount, mode: 'mp' };
-    }
+    try {
+      if (this.game === 'FF') {
+        settings = WebsiteAPI.calculateFFSensitivity(deviceWithName, this.playStyle, this.experienceLevel);
+        additionalInfo = { playStyle: this.playStyle, experienceLevel: this.experienceLevel };
+      } else {
+        settings = WebsiteAPI.calculateCODMSensitivity(deviceWithName, this.fingerCount);
+        additionalInfo = { fingerCount: this.fingerCount, mode: 'mp' };
+      }
 
-    return ResultFormatter.createSettingsText(deviceWithName, settings, this.game, additionalInfo);
+      return ResultFormatter.createSettingsText(deviceWithName, settings, this.game, additionalInfo);
+    } catch (error) {
+      console.error('Error creating settings text:', error);
+      return 'Error generating settings text';
+    }
   }
 }
 
