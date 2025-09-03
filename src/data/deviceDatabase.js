@@ -6370,3 +6370,5 @@ const deviceDatabase = {
     releaseYear: 2024 
   }
 };
+
+module.exports = { deviceDatabase };
