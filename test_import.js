@@ -1,12 +1,11 @@
-// Create this file to test each import individually
-// Run: node test_imports.js
+
 
 console.log('Testing imports...\n');
 
 // Test 1: Device Database
 try {
     console.log('1. Testing deviceDatabase import...');
-    const { deviceDatabase } = require('./data/deviceDatabase'); // Adjust path as needed
+    const { deviceDatabase } = require('src/data/deviceDatabase'); 
     console.log('   ✓ deviceDatabase imported successfully');
     console.log('   ✓ Found', Object.keys(deviceDatabase).length, 'devices');
     console.log('   ✓ First few devices:', Object.keys(deviceDatabase).slice(0, 3));
@@ -17,7 +16,7 @@ try {
 // Test 2: Game Enums
 try {
     console.log('\n2. Testing gameEnums import...');
-    const { Game, PlayStyle, ExperienceLevel, FingerCount } = require('./types/gameEnums'); // Adjust path
+    const { Game, PlayStyle, ExperienceLevel, FingerCount } = require('src/types/gameEnums'); // Adjust path
     console.log('   ✓ gameEnums imported successfully');
     console.log('   ✓ Game:', Game);
     console.log('   ✓ PlayStyle values:', Object.values(PlayStyle));
@@ -28,7 +27,7 @@ try {
 // Test 3: WebsiteAPI
 try {
     console.log('\n3. Testing WebsiteAPI import...');
-    const { WebsiteAPI } = require('./utils/websiteAPI'); // Adjust path
+    const { WebsiteAPI } = require('src/utils/websiteAPI'); // Adjust path
     console.log('   ✓ WebsiteAPI imported successfully');
     
     // Test static method with a mock device
@@ -42,7 +41,7 @@ try {
 // Test 4: ResultFormatter
 try {
     console.log('\n4. Testing ResultFormatter import...');
-    const { ResultFormatter } = require('./utils/formatters'); // Adjust path
+    const { ResultFormatter } = require('src/utils/formatters'); // Adjust path
     console.log('   ✓ ResultFormatter imported successfully');
     
     // Test device info formatting with a mock device
@@ -57,7 +56,7 @@ try {
 // Test 5: SensitivityHandler (this is where the error occurs)
 try {
     console.log('\n5. Testing SensitivityHandler import...');
-    const { SensitivityHandler } = require('./utils/SensitivityHandler'); // Adjust path
+    const { SensitivityHandler } = require('src/utils/SensitivityHandler'); // Adjust path
     console.log('   ✓ SensitivityHandler imported successfully');
 } catch (error) {
     console.log('   ✗ SensitivityHandler import failed:', error.message);
