@@ -31,20 +31,16 @@ function parseTimeToNigeria(timeStr) {
     if (period === 'PM' && hours !== 12) hour24 += 12;
     if (period === 'AM' && hours === 12) hour24 = 0;
     
-    const targetDate = new Date(now);
-    targetDate.setHours(hour24, minutes || 0, 0, 0);
+    // Create date in Nigeria timezone (UTC+1)
+    const targetDate = new Date();
+    targetDate.setUTCHours(hour24 - 1, minutes || 0, 0, 0); // UTC+1 = UTC - 1
     
-    const nigeriaOffset = 1 * 60;
-    const localOffset = targetDate.getTimezoneOffset();
-    const offsetDiff = (nigeriaOffset + localOffset) * 60000;
-    
-    const nigeriaTime = new Date(targetDate.getTime() + offsetDiff);
-    
-    if (nigeriaTime <= now) {
-        nigeriaTime.setDate(nigeriaTime.getDate() + 1);
+    // If the time has already passed today, set it for tomorrow
+    if (targetDate <= now) {
+        targetDate.setUTCDate(targetDate.getUTCDate() + 1);
     }
     
-    return nigeriaTime;
+    return targetDate;
 }
 
 function generateGiveawayId() {
@@ -69,6 +65,29 @@ async function createGiveawayEmbed(giveaway) {
     }
     
     return embed;
+}
+
+// Add error handling wrapper
+async function safeInteractionReply(interaction, options) {
+    try {
+        if (interaction.replied) {
+            return await interaction.followUp(options);
+        } else if (interaction.deferred) {
+            return await interaction.editReply(options);
+        } else {
+            return await interaction.reply(options);
+        }
+    } catch (error) {
+        console.error('Failed to send interaction reply:', error);
+        // Try alternative methods
+        try {
+            if (!interaction.replied && !interaction.deferred) {
+                return await interaction.reply({ ...options, ephemeral: true });
+            }
+        } catch (fallbackError) {
+            console.error('Fallback reply also failed:', fallbackError);
+        }
+    }
 }
 
 module.exports = {
@@ -117,7 +136,7 @@ module.exports = {
 
             const row = new ActionRowBuilder().addComponents(setupButton);
 
-            await interaction.reply({
+            await safeInteractionReply(interaction, {
                 content: 'Click the button below to setup a new giveaway:',
                 components: [row]
             });
@@ -128,7 +147,7 @@ module.exports = {
             const activeGiveaways = await getActiveGiveaways();
 
             if (!activeGiveaways.giveaways) {
-                return await interaction.reply({
+                return await safeInteractionReply(interaction, {
                     content: 'No active giveaways found.',
                     ephemeral: true
                 });
@@ -136,7 +155,7 @@ module.exports = {
 
             const giveawayIndex = activeGiveaways.giveaways.findIndex(g => g.id === giveawayId);
             if (giveawayIndex === -1) {
-                return await interaction.reply({
+                return await safeInteractionReply(interaction, {
                     content: 'Giveaway not found.',
                     ephemeral: true
                 });
@@ -186,7 +205,7 @@ module.exports = {
                 saveGiveawayHistory(historyData)
             ]);
 
-            await interaction.reply({
+            await safeInteractionReply(interaction, {
                 content: `✅ Giveaway "${giveaway.name}" has been ended without winners.`
             });
         }
@@ -196,7 +215,7 @@ module.exports = {
             const activeGiveaways = await getActiveGiveaways();
 
             if (!activeGiveaways.giveaways) {
-                return await interaction.reply({
+                return await safeInteractionReply(interaction, {
                     content: 'No active giveaways found.',
                     ephemeral: true
                 });
@@ -204,7 +223,7 @@ module.exports = {
 
             const giveawayIndex = activeGiveaways.giveaways.findIndex(g => g.id === giveawayId);
             if (giveawayIndex === -1) {
-                return await interaction.reply({
+                return await safeInteractionReply(interaction, {
                     content: 'Giveaway not found.',
                     ephemeral: true
                 });
@@ -213,7 +232,7 @@ module.exports = {
             const giveaway = activeGiveaways.giveaways[giveawayIndex];
 
             if (giveaway.participants.length === 0) {
-                return await interaction.reply({
+                return await safeInteractionReply(interaction, {
                     content: 'Cannot end giveaway with winners - no participants!',
                     ephemeral: true
                 });
@@ -271,7 +290,7 @@ module.exports = {
                 saveGiveawayHistory(historyData)
             ]);
 
-            await interaction.reply({
+            await safeInteractionReply(interaction, {
                 content: `✅ Giveaway "${giveaway.name}" has been ended with ${winners.length} winner${winners.length > 1 ? 's' : ''}!`
             });
         }
@@ -280,7 +299,7 @@ module.exports = {
             const activeGiveaways = await getActiveGiveaways();
 
             if (!activeGiveaways.giveaways || activeGiveaways.giveaways.length === 0) {
-                return await interaction.reply({
+                return await safeInteractionReply(interaction, {
                     content: 'No active giveaways found.'
                 });
             }
@@ -301,14 +320,14 @@ module.exports = {
 
             embed.setDescription(description);
 
-            await interaction.reply({ embeds: [embed] });
+            await safeInteractionReply(interaction, { embeds: [embed] });
         }
 
         else if (subcommand === 'history') {
             const historyData = await getGiveawayHistory();
 
             if (!historyData.history || historyData.history.length === 0) {
-                return await interaction.reply({
+                return await safeInteractionReply(interaction, {
                     content: 'No giveaway history found.'
                 });
             }
@@ -339,64 +358,91 @@ module.exports = {
             embed.setDescription(description);
             embed.setFooter({ text: `Showing last ${recentHistory.length} giveaways` });
 
-            await interaction.reply({ embeds: [embed] });
+            await safeInteractionReply(interaction, { embeds: [embed] });
         }
     },
 
     async handleSetupButton(interaction) {
-        const modal = new ModalBuilder()
-            .setCustomId('giveaway_setup_modal')
-            .setTitle('Setup New Giveaway');
+        try {
+            // Acknowledge the interaction immediately
+            if (!interaction.replied && !interaction.deferred) {
+                await interaction.deferReply({ ephemeral: true });
+            }
 
-        const nameInput = new TextInputBuilder()
-            .setCustomId('giveaway_name')
-            .setLabel('Giveaway Name')
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true)
-            .setMaxLength(100);
+            const modal = new ModalBuilder()
+                .setCustomId('giveaway_setup_modal')
+                .setTitle('Setup New Giveaway');
 
-        const imageInput = new TextInputBuilder()
-            .setCustomId('giveaway_image')
-            .setLabel('Image URL (Optional)')
-            .setStyle(TextInputStyle.Short)
-            .setRequired(false)
-            .setPlaceholder('https://media.discordapp.net/attachments/...');
+            const nameInput = new TextInputBuilder()
+                .setCustomId('giveaway_name')
+                .setLabel('Giveaway Name')
+                .setStyle(TextInputStyle.Short)
+                .setRequired(true)
+                .setMaxLength(100);
 
-        const endTimeInput = new TextInputBuilder()
-            .setCustomId('giveaway_endtime')
-            .setLabel('End Time (Nigeria GMT+1)')
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true)
-            .setPlaceholder('2:30PM or 11:45AM');
+            const imageInput = new TextInputBuilder()
+                .setCustomId('giveaway_image')
+                .setLabel('Image URL (Optional)')
+                .setStyle(TextInputStyle.Short)
+                .setRequired(false)
+                .setPlaceholder('https://media.discordapp.net/attachments/...');
 
-        const descriptionInput = new TextInputBuilder()
-            .setCustomId('giveaway_description')
-            .setLabel('Description')
-            .setStyle(TextInputStyle.Paragraph)
-            .setRequired(true)
-            .setMaxLength(1000);
+            const endTimeInput = new TextInputBuilder()
+                .setCustomId('giveaway_endtime')
+                .setLabel('End Time (Nigeria GMT+1)')
+                .setStyle(TextInputStyle.Short)
+                .setRequired(true)
+                .setPlaceholder('2:30PM or 11:45AM');
 
-        const optionsInput = new TextInputBuilder()
-            .setCustomId('giveaway_options')
-            .setLabel('Winners (1-25) | Tag Everyone (Yes/No)')
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true)
-            .setPlaceholder('3 | Yes');
+            const descriptionInput = new TextInputBuilder()
+                .setCustomId('giveaway_description')
+                .setLabel('Description')
+                .setStyle(TextInputStyle.Paragraph)
+                .setRequired(true)
+                .setMaxLength(1000);
 
-        const rows = [
-            new ActionRowBuilder().addComponents(nameInput),
-            new ActionRowBuilder().addComponents(imageInput),
-            new ActionRowBuilder().addComponents(endTimeInput),
-            new ActionRowBuilder().addComponents(descriptionInput),
-            new ActionRowBuilder().addComponents(optionsInput)
-        ];
+            const optionsInput = new TextInputBuilder()
+                .setCustomId('giveaway_options')
+                .setLabel('Winners (1-25) | Tag Everyone (Yes/No)')
+                .setStyle(TextInputStyle.Short)
+                .setRequired(true)
+                .setPlaceholder('3 | Yes');
 
-        modal.addComponents(...rows);
-        await interaction.showModal(modal);
+            const rows = [
+                new ActionRowBuilder().addComponents(nameInput),
+                new ActionRowBuilder().addComponents(imageInput),
+                new ActionRowBuilder().addComponents(endTimeInput),
+                new ActionRowBuilder().addComponents(descriptionInput),
+                new ActionRowBuilder().addComponents(optionsInput)
+            ];
+
+            modal.addComponents(...rows);
+            
+            // Cancel the deferred reply and show modal instead
+            try {
+                await interaction.deleteReply();
+            } catch (error) {
+                console.log('Could not delete deferred reply, proceeding with modal');
+            }
+            
+            await interaction.showModal(modal);
+            
+        } catch (error) {
+            console.error('Error in handleSetupButton:', error);
+            await safeInteractionReply(interaction, {
+                content: 'An error occurred while opening the setup modal.',
+                ephemeral: true
+            });
+        }
     },
 
     async handleSetupModal(interaction) {
         try {
+            // Defer the reply immediately to prevent timeout
+            if (!interaction.replied && !interaction.deferred) {
+                await interaction.deferReply();
+            }
+
             const name = interaction.fields.getTextInputValue('giveaway_name');
             const imageUrl = interaction.fields.getTextInputValue('giveaway_image') || null;
             const endTimeStr = interaction.fields.getTextInputValue('giveaway_endtime');
@@ -408,14 +454,14 @@ module.exports = {
             const tagEveryone = tagEveryoneStr.toLowerCase() === 'yes';
 
             if (isNaN(winners) || winners < 1 || winners > 25) {
-                return await interaction.reply({
+                return await safeInteractionReply(interaction, {
                     content: 'Winners must be a number between 1 and 25!',
                     ephemeral: true
                 });
             }
 
             if (imageUrl && !imageUrl.startsWith('https://')) {
-                return await interaction.reply({
+                return await safeInteractionReply(interaction, {
                     content: 'Image URL must start with https://',
                     ephemeral: true
                 });
@@ -425,7 +471,7 @@ module.exports = {
             try {
                 endTime = parseTimeToNigeria(endTimeStr);
             } catch (error) {
-                return await interaction.reply({
+                return await safeInteractionReply(interaction, {
                     content: 'Invalid time format! Use format like "2:30PM" or "11:45AM"',
                     ephemeral: true
                 });
@@ -456,7 +502,7 @@ module.exports = {
             const row = new ActionRowBuilder().addComponents(participateButton);
 
             const content = tagEveryone ? '@everyone' : null;
-            const message = await interaction.reply({
+            const message = await safeInteractionReply(interaction, {
                 content,
                 embeds: [embed],
                 components: [row],
@@ -471,13 +517,17 @@ module.exports = {
 
             await saveActiveGiveaways(activeGiveaways);
 
-            setTimeout(async () => {
-                await this.autoEndGiveaway(giveawayId, interaction.client);
-            }, endTime.getTime() - Date.now());
+            // Set timeout for auto-ending
+            const timeUntilEnd = endTime.getTime() - Date.now();
+            if (timeUntilEnd > 0) {
+                setTimeout(async () => {
+                    await this.autoEndGiveaway(giveawayId, interaction.client);
+                }, timeUntilEnd);
+            }
 
         } catch (error) {
             console.error('Error in giveaway setup modal:', error);
-            await interaction.reply({
+            await safeInteractionReply(interaction, {
                 content: 'An error occurred while setting up the giveaway.',
                 ephemeral: true
             });
@@ -486,11 +536,16 @@ module.exports = {
 
     async handleParticipate(interaction, giveawayId) {
         try {
+            // Acknowledge the interaction immediately
+            if (!interaction.replied && !interaction.deferred) {
+                await interaction.deferUpdate();
+            }
+
             const activeGiveaways = await getActiveGiveaways();
             const giveawayIndex = activeGiveaways.giveaways?.findIndex(g => g.id === giveawayId);
 
             if (giveawayIndex === -1 || !activeGiveaways.giveaways) {
-                return await interaction.reply({
+                return await interaction.followUp({
                     content: 'This giveaway no longer exists.',
                     ephemeral: true
                 });
@@ -499,7 +554,7 @@ module.exports = {
             const giveaway = activeGiveaways.giveaways[giveawayIndex];
 
             if (giveaway.participants.includes(interaction.user.id)) {
-                return await interaction.reply({
+                return await interaction.followUp({
                     content: 'You are already participating in this giveaway!',
                     ephemeral: true
                 });
@@ -509,7 +564,12 @@ module.exports = {
             await saveActiveGiveaways(activeGiveaways);
 
             const updatedEmbed = await createGiveawayEmbed(giveaway);
-            await interaction.update({ embeds: [updatedEmbed] });
+            
+            try {
+                await interaction.editReply({ embeds: [updatedEmbed] });
+            } catch (editError) {
+                console.error('Could not edit original message:', editError);
+            }
 
             await interaction.followUp({
                 content: 'You have successfully joined the giveaway! Good luck! 🍀',
@@ -518,10 +578,14 @@ module.exports = {
 
         } catch (error) {
             console.error('Error in giveaway participation:', error);
-            await interaction.reply({
-                content: 'An error occurred while joining the giveaway.',
-                ephemeral: true
-            });
+            try {
+                await interaction.followUp({
+                    content: 'An error occurred while joining the giveaway.',
+                    ephemeral: true
+                });
+            } catch (followUpError) {
+                console.error('Could not send error follow-up:', followUpError);
+            }
         }
     },
 
