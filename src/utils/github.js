@@ -1,11 +1,9 @@
 const { Octokit } = require('@octokit/rest');
 
-// Initialize octokit instance
 const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
 const owner = process.env.GITHUB_OWNER;
 const repo = process.env.GITHUB_REPO;
 
-// Path mapping for consistent file structure
 const FILE_PATHS = {
     config: 'data/config.json',
     warnings: 'data/moderation/warnings.json',
@@ -16,7 +14,9 @@ const FILE_PATHS = {
     levels: 'data/leveling/levels.json',
     timers: 'data/features/timers.json',
     bank: 'data/economy/bank.json',
-    linked_users: 'data/linked_users.json' // Added for sensitivity login system
+    linked_users: 'data/linked_users.json',
+    active_giveaways: 'data/giveaways/active.json',
+    giveaway_history: 'data/giveaways/history.json'
 };
 
 async function initializeRepo(octokit, owner, repo) {
@@ -98,7 +98,6 @@ async function saveData(pathOrKey, content, message = 'Update data', maxRetries 
             await initializeRepo(octokit, owner, repo);
             const path = FILE_PATHS[pathOrKey] || pathOrKey;
             
-            // Ensure directory exists
             const pathParts = path.split('/');
             if (pathParts.length > 1) {
                 for (let i = 1; i < pathParts.length; i++) {
@@ -109,7 +108,6 @@ async function saveData(pathOrKey, content, message = 'Update data', maxRetries 
                 }
             }
             
-            // Get current file info for SHA
             let sha;
             try {
                 const existing = await octokit.rest.repos.getContent({
@@ -139,7 +137,6 @@ async function saveData(pathOrKey, content, message = 'Update data', maxRetries 
             
         } catch (error) {
             if (error.status === 409 && attempt < maxRetries - 1) {
-                // SHA conflict, wait and retry
                 attempt++;
                 await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
                 continue;
@@ -154,7 +151,6 @@ async function saveData(pathOrKey, content, message = 'Update data', maxRetries 
     }
 }
 
-// Helper functions for specific data types
 async function getConfig() {
     return await getData('config');
 }
@@ -227,7 +223,6 @@ async function saveBankData(bankData, message = 'Update bank data') {
     return await saveData('bank', bankData, message);
 }
 
-// New helper functions for linked users
 async function getLinkedUsers() {
     return await getData('linked_users');
 }
@@ -236,13 +231,27 @@ async function saveLinkedUsers(linkedUsers, message = 'Update linked users') {
     return await saveData('linked_users', linkedUsers, message);
 }
 
-// Test function to verify permissions
+async function getActiveGiveaways() {
+    return await getData('active_giveaways');
+}
+
+async function saveActiveGiveaways(activeGiveaways, message = 'Update active giveaways') {
+    return await saveData('active_giveaways', activeGiveaways, message);
+}
+
+async function getGiveawayHistory() {
+    return await getData('giveaway_history');
+}
+
+async function saveGiveawayHistory(giveawayHistory, message = 'Update giveaway history') {
+    return await saveData('giveaway_history', giveawayHistory, message);
+}
+
 async function testPermissions() {
     try {
         const { data: tokenData } = await octokit.rest.users.getAuthenticated();
         const { data: repoData } = await octokit.rest.repos.get({ owner, repo });
 
-        // Test write access
         const testFilePath = '.github/test-write-access';
         try {
             await octokit.rest.repos.createOrUpdateFileContents({
@@ -253,7 +262,6 @@ async function testPermissions() {
                 content: Buffer.from('test').toString('base64'),
             });
             
-            // Clean up test file
             const { data: fileData } = await octokit.rest.repos.getContent({
                 owner,
                 repo,
@@ -278,12 +286,10 @@ async function testPermissions() {
 }
 
 module.exports = {
-    // Core functions
     getData,
     saveData,
     testPermissions,
     
-    // Specific data type functions
     getConfig,
     saveConfig,
     getWarnings,
@@ -304,7 +310,10 @@ module.exports = {
     saveBankData,
     getLinkedUsers,
     saveLinkedUsers,
+    getActiveGiveaways,
+    saveActiveGiveaways,
+    getGiveawayHistory,
+    saveGiveawayHistory,
     
-    // Path mapping
     FILE_PATHS
 };
