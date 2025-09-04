@@ -199,9 +199,7 @@ for (const file of eventFiles) {
     }
 }
 
-// Enhanced interaction handler with autocomplete support
 client.on('interactionCreate', async interaction => {
-    // Handle autocomplete interactions (NEW)
     if (interaction.isAutocomplete()) {
         const command = client.commands.get(interaction.commandName);
         
@@ -216,7 +214,6 @@ client.on('interactionCreate', async interaction => {
             }
         } catch (error) {
             console.error('Autocomplete error:', error);
-            // Always respond to prevent Discord errors
             try {
                 await interaction.respond([]);
             } catch (respondError) {
@@ -226,7 +223,6 @@ client.on('interactionCreate', async interaction => {
         return;
     }
 
-    // Handle slash commands
     if (interaction.isChatInputCommand()) {
         const command = client.commands.get(interaction.commandName);
         if (!command) return;
@@ -255,7 +251,38 @@ client.on('interactionCreate', async interaction => {
         }
     }
     
-    // Handle modal submissions
+    else if (interaction.isButton()) {
+        try {
+            const customId = interaction.customId;
+            
+            if (customId === 'giveaway_setup_btn') {
+                const giveawayHandler = require('./src/commands/giveaway');
+                await giveawayHandler.handleSetupButton(interaction);
+            }
+            else if (customId.startsWith('giveaway_participate_')) {
+                const giveawayId = customId.replace('giveaway_participate_', '');
+                const giveawayHandler = require('./src/commands/giveaway');
+                await giveawayHandler.handleParticipate(interaction, giveawayId);
+            }
+            else {
+                console.log(`Unhandled button: ${customId}`);
+            }
+        } catch (error) {
+            console.error('Button interaction error:', error);
+            
+            try {
+                if (!interaction.replied && !interaction.deferred) {
+                    await interaction.reply({ 
+                        content: '❌ There was an error processing this button!', 
+                        ephemeral: true 
+                    });
+                }
+            } catch (replyError) {
+                console.error('Failed to send button error reply:', replyError);
+            }
+        }
+    }
+    
     else if (interaction.isModalSubmit()) {
         try {
             const customId = interaction.customId;
@@ -267,6 +294,10 @@ client.on('interactionCreate', async interaction => {
             else if (customId.startsWith('device_modal_') || customId === 'device_modal') {
                 const sensitivityHandler = require('./src/commands/sensitivity');
                 await sensitivityHandler.handleDeviceModal(interaction);
+            }
+            else if (customId === 'giveaway_setup_modal') {
+                const giveawayHandler = require('./src/commands/giveaway');
+                await giveawayHandler.handleSetupModal(interaction);
             }
             else {
                 console.log(`Unhandled modal: ${customId}`);
@@ -287,12 +318,10 @@ client.on('interactionCreate', async interaction => {
         }
     }
 
-    // Handle string select menus
     else if (interaction.isStringSelectMenu()) {
         try {
             const customId = interaction.customId;
             
-            // Route sensitivity command interactions
             if (customId.startsWith('game_select') || customId === 'game_select') {
                 const sensitivityHandler = require('./src/commands/sensitivity');
                 await sensitivityHandler.handleGameSelection(interaction);
