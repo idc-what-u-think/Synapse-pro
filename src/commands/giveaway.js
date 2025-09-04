@@ -364,11 +364,6 @@ module.exports = {
 
     async handleSetupButton(interaction) {
         try {
-            // Acknowledge the interaction immediately
-            if (!interaction.replied && !interaction.deferred) {
-                await interaction.deferReply({ ephemeral: true });
-            }
-
             const modal = new ModalBuilder()
                 .setCustomId('giveaway_setup_modal')
                 .setTitle('Setup New Giveaway');
@@ -418,21 +413,22 @@ module.exports = {
 
             modal.addComponents(...rows);
             
-            // Cancel the deferred reply and show modal instead
-            try {
-                await interaction.deleteReply();
-            } catch (error) {
-                console.log('Could not delete deferred reply, proceeding with modal');
-            }
-            
+            // Show modal directly - no deferring or replying allowed before showModal()
             await interaction.showModal(modal);
             
         } catch (error) {
             console.error('Error in handleSetupButton:', error);
-            await safeInteractionReply(interaction, {
-                content: 'An error occurred while opening the setup modal.',
-                ephemeral: true
-            });
+            // Only send error reply if showModal() failed and interaction hasn't been handled
+            if (!interaction.replied && !interaction.deferred) {
+                try {
+                    await interaction.reply({
+                        content: 'An error occurred while opening the setup modal.',
+                        ephemeral: true
+                    });
+                } catch (replyError) {
+                    console.error('Could not send error reply:', replyError);
+                }
+            }
         }
     },
 
