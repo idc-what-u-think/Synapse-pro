@@ -9,12 +9,8 @@ const FILE_PATHS = {
     warnings: 'data/moderation/warnings.json',
     bans: 'data/moderation/bans.json',
     mutes: 'data/moderation/mutes.json',
-    balances: 'data/economy/balances.json',
-    daily: 'data/economy/daily.json',
     levels: 'data/leveling/levels.json',
     timers: 'data/features/timers.json',
-    bank: 'data/economy/bank.json',
-    linked_users: 'data/linked_users.json',
     active_giveaways: 'data/giveaways/active.json',
     giveaway_history: 'data/giveaways/history.json'
 };
@@ -183,22 +179,6 @@ async function saveMutes(mutes, message = 'Update mutes') {
     return await saveData('mutes', mutes, message);
 }
 
-async function getBalances() {
-    return await getData('balances');
-}
-
-async function saveBalances(balances, message = 'Update balances') {
-    return await saveData('balances', balances, message);
-}
-
-async function getDaily() {
-    return await getData('daily');
-}
-
-async function saveDaily(daily, message = 'Update daily') {
-    return await saveData('daily', daily, message);
-}
-
 async function getLevels() {
     return await getData('levels');
 }
@@ -213,22 +193,6 @@ async function getTimers() {
 
 async function saveTimers(timers, message = 'Update timers') {
     return await saveData('timers', timers, message);
-}
-
-async function getBankData() {
-    return await getData('bank');
-}
-
-async function saveBankData(bankData, message = 'Update bank data') {
-    return await saveData('bank', bankData, message);
-}
-
-async function getLinkedUsers() {
-    return await getData('linked_users');
-}
-
-async function saveLinkedUsers(linkedUsers, message = 'Update linked users') {
-    return await saveData('linked_users', linkedUsers, message);
 }
 
 async function getActiveGiveaways() {
@@ -298,18 +262,10 @@ module.exports = {
     saveBans,
     getMutes,
     saveMutes,
-    getBalances,
-    saveBalances,
-    getDaily,
-    saveDaily,
     getLevels,
     saveLevels,
     getTimers,
     saveTimers,
-    getBankData,
-    saveBankData,
-    getLinkedUsers,
-    saveLinkedUsers,
     getActiveGiveaways,
     saveActiveGiveaways,
     getGiveawayHistory,
