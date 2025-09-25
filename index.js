@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Collection, Routes, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, Routes } = require('discord.js');
 const { REST } = require('@discordjs/rest');
 const fs = require('fs');
 const path = require('path');
@@ -23,45 +23,6 @@ const client = new Client({
 client.commands = new Collection();
 const commandsPath = path.join(__dirname, 'src/commands');
 const eventPath = path.join(__dirname, 'src/events');
-
-async function updateBankMessage() {
-    try {
-        const bankChannelId = process.env.BANK_CHANNEL_ID;
-        if (!bankChannelId) return;
-
-        const bankChannel = client.channels.cache.get(bankChannelId);
-        if (!bankChannel) return;
-
-        const bankData = await github.getBankData();
-        const balance = bankData.balance || 10000000;
-
-        const embed = new EmbedBuilder()
-            .setColor(0x00FF00)
-            .setTitle('Firekid Project Server Trust Fund')
-            .setDescription(`Balance: **${balance.toLocaleString()}** coins`)
-            .setFooter({ text: 'funded by firekid' })
-            .setTimestamp();
-
-        try {
-            const messages = await bankChannel.messages.fetch({ limit: 10 });
-            const bankMessage = messages.find(msg => 
-                msg.author.id === client.user.id && 
-                msg.embeds.length > 0 && 
-                msg.embeds[0].title === 'Firekid Project Server Trust Fund'
-            );
-
-            if (bankMessage) {
-                await bankMessage.edit({ embeds: [embed] });
-            } else {
-                await bankChannel.send({ embeds: [embed] });
-            }
-        } catch (error) {
-            console.error('Error updating bank message:', error);
-        }
-    } catch (error) {
-        console.error('Error in updateBankMessage:', error);
-    }
-}
 
 const startSelfPing = () => {
     const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
@@ -291,10 +252,6 @@ client.on('interactionCreate', async interaction => {
                 const loginHandler = require('./src/commands/login');
                 await loginHandler.handleLoginModal(interaction);
             } 
-            else if (customId.startsWith('device_modal_') || customId === 'device_modal') {
-                const sensitivityHandler = require('./src/commands/sensitivity');
-                await sensitivityHandler.handleDeviceModal(interaction);
-            }
             else if (customId === 'giveaway_setup_modal') {
                 const giveawayHandler = require('./src/commands/giveaway');
                 await giveawayHandler.handleSetupModal(interaction);
@@ -317,45 +274,6 @@ client.on('interactionCreate', async interaction => {
             }
         }
     }
-
-    else if (interaction.isStringSelectMenu()) {
-        try {
-            const customId = interaction.customId;
-            
-            if (customId.startsWith('game_select') || customId === 'game_select') {
-                const sensitivityHandler = require('./src/commands/sensitivity');
-                await sensitivityHandler.handleGameSelection(interaction);
-            }
-            else if (customId.startsWith('finger_select') || customId === 'finger_select') {
-                const sensitivityHandler = require('./src/commands/sensitivity');
-                await sensitivityHandler.handleFingerSelection(interaction);
-            }
-            else if (customId.startsWith('playstyle_select') || customId === 'playstyle_select') {
-                const sensitivityHandler = require('./src/commands/sensitivity');
-                await sensitivityHandler.handlePlaystyleSelection(interaction);
-            }
-            else if (customId.startsWith('device_final_select') || customId === 'device_final_select') {
-                const sensitivityHandler = require('./src/commands/sensitivity');
-                await sensitivityHandler.handleDeviceFinalSelection(interaction);
-            }
-            else {
-                console.log(`Unhandled select menu: ${customId}`);
-            }
-        } catch (error) {
-            console.error('Select menu interaction error:', error);
-            
-            try {
-                if (!interaction.replied && !interaction.deferred) {
-                    await interaction.reply({ 
-                        content: '❌ There was an error processing your selection!', 
-                        ephemeral: true 
-                    });
-                }
-            } catch (replyError) {
-                console.error('Failed to send select menu error reply:', replyError);
-            }
-        }
-    }
 });
 
 client.once('ready', async () => {
@@ -368,9 +286,6 @@ client.once('ready', async () => {
     
     startHealthServer();
     startSelfPing();
-    
-    updateBankMessage();
-    setInterval(updateBankMessage, 6 * 60 * 60 * 1000);
 });
 
 client.on('error', error => {
