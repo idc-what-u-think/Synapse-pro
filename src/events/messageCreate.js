@@ -100,7 +100,8 @@ async function saveUserHistory(userId, messages) {
         await saveData(historyPath, { 
             userId, 
             messages, 
-            lastUpdated: new Date().toISOString() 
+            lastUpdated: new Date().toISOString(),
+            messageCount: messages.length
         }, `Update AI history for user ${userId}`);
         console.log(`Successfully saved history for user ${userId}`);
     } catch (error) {
@@ -115,8 +116,7 @@ async function addToUserHistory(userId, role, content) {
         
         history.push({
             role,
-            parts: [{ text: content }],
-            timestamp: new Date().toISOString()
+            parts: [{ text: content }]
         });
         
         if (history.length > 10) {
