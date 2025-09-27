@@ -246,15 +246,9 @@ async function handleAIMessage(message, config) {
         let result;
         const imageAttachment = message.attachments.find(att => att.contentType?.startsWith('image/'));
 
-        const systemPrompt = `You are a casual, friendly chatbot. Keep responses short and conversational. Be helpful but concise. Use internet slang and abbreviations naturally when appropriate. Be funny and relatable. Don't give long explanations unless specifically asked. Respond like you're chatting with a friend on Discord.
+        const systemPrompt = "You are a casual, friendly chatbot. Keep responses short and conversational. Be helpful but concise. Use internet slang and abbreviations naturally. Be funny and relatable. Don't give long explanations unless asked. Respond like chatting with a friend on Discord. Know common abbreviations (lol, brb, imo, etc.) and be engaging.";
 
-Key guidelines:
-- Keep answers brief and to the point
-- Use casual language and internet slang
-- Know common abbreviations (lol, brb, imo, etc.)
-- Be funny and engaging when appropriate  
-- Don't over-explain unless asked
-- Chat naturally like a friend would`;
+        const enhancedPrompt = `${systemPrompt}\n\nUser: ${prompt}`;
 
         if (imageAttachment) {
             console.log('Processing image attachment');
@@ -268,19 +262,17 @@ Key guidelines:
             };
 
             const chat = aiInstance.model.startChat({
-                history: userHistory,
-                systemInstruction: systemPrompt
+                history: userHistory
             });
 
-            result = await chat.sendMessage([prompt, imageData]);
+            result = await chat.sendMessage([enhancedPrompt, imageData]);
         } else {
             console.log('Processing text-only message');
             const chat = aiInstance.model.startChat({
-                history: userHistory,
-                systemInstruction: systemPrompt
+                history: userHistory
             });
 
-            result = await chat.sendMessage(prompt);
+            result = await chat.sendMessage(enhancedPrompt);
         }
 
         const responseText = result.response.text();
