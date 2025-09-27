@@ -1,18 +1,37 @@
 const { Events, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const { getConfig, getLevels, saveLevels } = require('../utils/github');
+const { getConfig, getLevels, saveLevels, getData, saveData } = require('../utils/github');
 const { getLevel } = require('../utils/xp');
 
-// Initialize Gemini AI
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+const GEMINI_KEYS = [
+    process.env.GEMINI_API_KEY_1,
+    process.env.GEMINI_API_KEY_2,
+    process.env.GEMINI_API_KEY_3,
+    process.env.GEMINI_API_KEY_4,
+    process.env.GEMINI_API_KEY_5
+].filter(key => key);
 
-// AI Rate limiting storage
+console.log(`Found ${GEMINI_KEYS.length} Gemini API keys`);
+
+if (GEMINI_KEYS.length === 0) {
+    console.error('No Gemini API keys found! Please set at least GEMINI_API_KEY_1 in your environment variables.');
+}
+
+const aiInstances = GEMINI_KEYS.map((key, index) => {
+    const genAI = new GoogleGenerativeAI(key);
+    return {
+        model: genAI.getGenerativeModel({ model: 'gemini-2.5-flash' }),
+        key: key.substring(0, 8) + '...',
+        index: index + 1
+    };
+});
+
+let currentKeyIndex = 0;
+
 const rateLimits = new Map();
-const RATE_LIMIT_REQUESTS = 10; // 10 requests per minute
-const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute in milliseconds
+const RATE_LIMIT_REQUESTS = 10;
+const RATE_LIMIT_WINDOW = 60 * 1000;
 
-// URL detection regex patterns
 const URL_PATTERNS = [
     /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/gi,
     /discord\.gg\/[a-zA-Z0-9]+/gi,
@@ -20,9 +39,8 @@ const URL_PATTERNS = [
     /www\.[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/gi
 ];
 
-// XP Cooldown system - 5 seconds
-const XP_COOLDOWN = 5 * 1000; // 5 seconds in milliseconds
-const xpCooldowns = new Map(); // userId -> timestamp
+const XP_COOLDOWN = 5 * 1000;
+const xpCooldowns = new Map();
 
 function containsLink(message) {
     return URL_PATTERNS.some(pattern => pattern.test(message));
@@ -42,38 +60,96 @@ function setXPCooldown(userId) {
     xpCooldowns.set(userId, Date.now());
 }
 
-// Clean up old cooldown entries every 10 minutes to prevent memory leaks
 setInterval(() => {
     const now = Date.now();
     for (const [userId, timestamp] of xpCooldowns.entries()) {
-        if (now - timestamp > XP_COOLDOWN * 2) { // Clean entries older than 2x cooldown
+        if (now - timestamp > XP_COOLDOWN * 2) {
             xpCooldowns.delete(userId);
         }
     }
-}, 10 * 60 * 1000); // 10 minutes
+}, 10 * 60 * 1000);
+
+function getNextAIInstance() {
+    if (aiInstances.length === 0) {
+        throw new Error('No Gemini API keys available');
+    }
+    
+    const instance = aiInstances[currentKeyIndex];
+    currentKeyIndex = (currentKeyIndex + 1) % aiInstances.length;
+    console.log(`Using AI instance ${instance.index} (${instance.key})`);
+    return instance;
+}
+
+async function getUserHistory(userId) {
+    try {
+        console.log(`Loading history for user ${userId}`);
+        const historyPath = `data/ai_history/${userId}.json`;
+        const history = await getData(historyPath);
+        console.log(`Found ${history.messages?.length || 0} messages in history for user ${userId}`);
+        return history.messages || [];
+    } catch (error) {
+        console.log(`No existing history found for user ${userId}, starting fresh`);
+        return [];
+    }
+}
+
+async function saveUserHistory(userId, messages) {
+    try {
+        console.log(`Saving ${messages.length} messages to history for user ${userId}`);
+        const historyPath = `data/ai_history/${userId}.json`;
+        await saveData(historyPath, { 
+            userId, 
+            messages, 
+            lastUpdated: new Date().toISOString() 
+        }, `Update AI history for user ${userId}`);
+        console.log(`Successfully saved history for user ${userId}`);
+    } catch (error) {
+        console.error(`Error saving user history for ${userId}:`, error);
+    }
+}
+
+async function addToUserHistory(userId, role, content) {
+    try {
+        console.log(`Adding ${role} message to history for user ${userId}`);
+        let history = await getUserHistory(userId);
+        
+        history.push({
+            role,
+            parts: [{ text: content }],
+            timestamp: new Date().toISOString()
+        });
+        
+        if (history.length > 10) {
+            const removed = history.length - 1;
+            history = history.slice(-1);
+            console.log(`Trimmed ${removed} old messages from history for user ${userId}`);
+        }
+        
+        await saveUserHistory(userId, history);
+        return history;
+    } catch (error) {
+        console.error(`Error adding to user history for ${userId}:`, error);
+        return [];
+    }
+}
 
 module.exports = {
     name: Events.MessageCreate,
     async execute(message, client) {
         if (message.author.bot) return;
-        if (!message.guild) return; // Ignore DMs
+        if (!message.guild) return;
 
         try {
-            // Get config once for all handlers
             const config = await getConfig();
             
-            // Handle antilink protection (check first, before other handlers)
             const linkDeleted = await handleAntilink(message, config);
-            if (linkDeleted) return; // Don't process further if message was deleted
+            if (linkDeleted) return;
             
-            // Handle word filtering
             const wordFiltered = await handleWordFiltering(message, config);
-            if (wordFiltered) return; // Don't process further if message was deleted
+            if (wordFiltered) return;
             
-            // Handle AI responses (NEW)
             await handleAIMessage(message, config);
             
-            // Handle XP/leveling system (only if message wasn't deleted)
             await handleLeveling(message);
             
         } catch (error) {
@@ -82,59 +158,59 @@ module.exports = {
     },
 };
 
-// AI Message Handler (NEW)
 async function handleAIMessage(message, config) {
     const guildId = message.guild.id;
     const userId = message.author.id;
     const channelId = message.channel.id;
 
     try {
-        // Get guild config (config already loaded in main function)
+        console.log(`Processing AI message from ${message.author.tag} in ${message.guild.name}`);
+        
         const guildConfig = config[guildId] || {};
 
-        // Check maintenance mode
         if (guildConfig.maintenanceMode) {
             const member = message.member;
             const isAdmin = member.permissions.has(PermissionFlagsBits.Administrator);
             
             if (!isAdmin) {
-                return; // Don't respond to non-admins in maintenance mode
+                console.log('Bot in maintenance mode, ignoring non-admin message');
+                return;
             }
         }
 
-        // Check if should respond
         let shouldRespond = false;
         const botMention = `<@${message.client.user.id}>`;
         const isTagged = message.content.includes(botMention);
 
         if (guildConfig.aiChannel) {
-            // AI channel is configured
             if (channelId === guildConfig.aiChannel) {
-                shouldRespond = true; // Always respond in AI channel
+                shouldRespond = true;
+                console.log('Message in AI channel, will respond');
             } else if (isTagged) {
-                // Only respond if tagged by admin in other channels
                 const member = message.member;
                 const isAdmin = member.permissions.has(PermissionFlagsBits.ManageGuild);
                 shouldRespond = isAdmin;
+                console.log(`Bot tagged by ${isAdmin ? 'admin' : 'non-admin'}, will ${shouldRespond ? '' : 'not '}respond`);
             }
         } else {
-            // No AI channel configured, only respond when tagged
             if (isTagged) {
                 shouldRespond = true;
+                console.log('Bot tagged and no AI channel set, will respond');
             }
         }
 
-        if (!shouldRespond) return;
+        if (!shouldRespond) {
+            console.log('Should not respond, skipping AI processing');
+            return;
+        }
 
-        // Rate limiting
         const now = Date.now();
         const userLimits = rateLimits.get(userId) || { requests: [] };
         
-        // Clean old requests
         userLimits.requests = userLimits.requests.filter(time => now - time < RATE_LIMIT_WINDOW);
         
-        // Check rate limit
         if (userLimits.requests.length >= RATE_LIMIT_REQUESTS) {
+            console.log(`Rate limit exceeded for user ${message.author.tag}`);
             const embed = new EmbedBuilder()
                 .setColor(0xFF9900)
                 .setDescription('⏰ **Rate limit exceeded!** Please wait a moment before asking again.');
@@ -142,17 +218,15 @@ async function handleAIMessage(message, config) {
             return message.reply({ embeds: [embed] });
         }
 
-        // Add current request to rate limit tracking
         userLimits.requests.push(now);
         rateLimits.set(userId, userLimits);
 
-        // Show typing indicator
         message.channel.sendTyping();
 
-        // Clean the prompt (remove bot mention if present)
         let prompt = message.content.replace(botMention, '').trim();
         
         if (!prompt) {
+            console.log('Empty prompt after cleaning, sending greeting');
             const embed = new EmbedBuilder()
                 .setColor(0x4285F4)
                 .setDescription('👋 **Hi there!** Ask me anything or upload an image for me to analyze!');
@@ -160,12 +234,30 @@ async function handleAIMessage(message, config) {
             return message.reply({ embeds: [embed] });
         }
 
-        // Handle attachments (images)
+        console.log(`Processing prompt: "${prompt.substring(0, 100)}${prompt.length > 100 ? '...' : ''}"`);
+
+        if (GEMINI_KEYS.length === 0) {
+            throw new Error('No Gemini API keys configured');
+        }
+
+        const userHistory = await getUserHistory(userId);
+        const aiInstance = getNextAIInstance();
+
         let result;
         const imageAttachment = message.attachments.find(att => att.contentType?.startsWith('image/'));
 
+        const systemPrompt = `You are a casual, friendly chatbot. Keep responses short and conversational. Be helpful but concise. Use internet slang and abbreviations naturally when appropriate. Be funny and relatable. Don't give long explanations unless specifically asked. Respond like you're chatting with a friend on Discord.
+
+Key guidelines:
+- Keep answers brief and to the point
+- Use casual language and internet slang
+- Know common abbreviations (lol, brb, imo, etc.)
+- Be funny and engaging when appropriate  
+- Don't over-explain unless asked
+- Chat naturally like a friend would`;
+
         if (imageAttachment) {
-            // Handle image + text input
+            console.log('Processing image attachment');
             const response = await fetch(imageAttachment.url);
             const imageBuffer = await response.arrayBuffer();
             const imageData = {
@@ -175,16 +267,30 @@ async function handleAIMessage(message, config) {
                 }
             };
 
-            result = await model.generateContent([prompt, imageData]);
+            const chat = aiInstance.model.startChat({
+                history: userHistory,
+                systemInstruction: systemPrompt
+            });
+
+            result = await chat.sendMessage([prompt, imageData]);
         } else {
-            // Handle text-only input
-            result = await model.generateContent(prompt);
+            console.log('Processing text-only message');
+            const chat = aiInstance.model.startChat({
+                history: userHistory,
+                systemInstruction: systemPrompt
+            });
+
+            result = await chat.sendMessage(prompt);
         }
 
         const responseText = result.response.text();
+        console.log(`Generated response length: ${responseText.length} characters`);
         
-        // Handle long responses
+        await addToUserHistory(userId, 'user', prompt);
+        await addToUserHistory(userId, 'model', responseText);
+        
         if (responseText.length > 1900) {
+            console.log('Response too long, splitting message');
             const embed = new EmbedBuilder()
                 .setColor(0x4285F4)
                 .setDescription(responseText.substring(0, 1900) + '...')
@@ -192,18 +298,19 @@ async function handleAIMessage(message, config) {
 
             await message.reply({ embeds: [embed] });
             
-            // Send remaining text
             const remaining = responseText.substring(1900);
             if (remaining.length > 0) {
                 await message.channel.send(remaining.substring(0, 1900));
             }
         } else {
-            // Normal response
             await message.reply(responseText);
         }
 
+        console.log(`Successfully processed AI message for ${message.author.tag}`);
+
     } catch (error) {
-        console.error('AI Message Error:', error);
+        console.error('Detailed AI Message Error:', error);
+        console.error('Error stack:', error.stack);
 
         let errorMessage = '❌ **An error occurred while processing your request.**';
 
@@ -213,13 +320,19 @@ async function handleAIMessage(message, config) {
             errorMessage = '⏰ **Rate limit hit!** Please wait a moment.';
         } else if (error.message?.includes('blocked')) {
             errorMessage = '🚫 **Content blocked!** Your request was flagged by safety filters.';
+        } else if (error.message?.includes('No Gemini API keys')) {
+            errorMessage = '⚙️ **Configuration error!** No AI keys available.';
         }
 
         const embed = new EmbedBuilder()
             .setColor(0xFF0000)
             .setDescription(errorMessage);
 
-        await message.reply({ embeds: [embed] });
+        try {
+            await message.reply({ embeds: [embed] });
+        } catch (replyError) {
+            console.error('Failed to send error message:', replyError);
+        }
     }
 }
 
@@ -228,41 +341,33 @@ async function handleAntilink(message, config) {
         const guildConfig = config?.guilds?.[message.guild.id];
         const antilink = guildConfig?.antilink;
 
-        // Skip if antilink not configured or disabled
         if (!antilink || !antilink.enabled) return false;
 
-        // Skip if channel not protected
         if (!antilink.protectedChannels.includes(message.channel.id)) return false;
 
-        // Skip if user has bypass role
         if (antilink.bypassRoles?.some(roleId => message.member.roles.cache.has(roleId))) return false;
 
-        // Skip if user has admin permissions
         if (message.member.permissions.has(PermissionFlagsBits.Administrator)) return false;
 
-        // Check for links
         if (containsLink(message.content)) {
             console.log(`Link detected from ${message.author.tag} in #${message.channel.name}: ${message.content}`);
             
-            // Delete the message
             await message.delete();
             
-            // Send warning message
             const warningText = antilink.message || "please refrain from sending links in this channel";
             const warningMessage = await message.channel.send(
                 `${message.author}, ${warningText}`
             );
             
-            // Auto-delete warning after 5 seconds
             setTimeout(() => {
                 warningMessage.delete().catch(() => {});
             }, 5000);
             
             console.log(`Antilink: Deleted link from ${message.author.tag} in #${message.channel.name}`);
-            return true; // Message was deleted
+            return true;
         }
 
-        return false; // No link found
+        return false;
     } catch (error) {
         console.error('Error in antilink handler:', error);
         return false;
@@ -279,13 +384,11 @@ async function handleWordFiltering(message, config) {
             return false;
         }
         
-        // Check bypass roles
         if (filter.bypassRoles?.some(roleId => message.member.roles.cache.has(roleId))) {
             console.log('User has bypass role, skipping filter');
             return false;
         }
 
-        // Skip if user has admin permissions
         if (message.member.permissions.has(PermissionFlagsBits.Administrator)) return false;
 
         const content = message.content.toLowerCase();
@@ -303,7 +406,6 @@ async function handleWordFiltering(message, config) {
                     console.error('Failed to delete message:', deleteError);
                 }
                 
-                // Apply the configured action
                 try {
                     switch (filterConfig.action) {
                         case 'mute':
@@ -312,9 +414,7 @@ async function handleWordFiltering(message, config) {
                             break;
                             
                         case 'warn':
-                            // You'll need to implement a warn system or call your warn command
                             console.log(`User should be warned for filtered word: ${word}`);
-                            // Example: await handleWarn(message.member, `Filtered word: ${word}`);
                             break;
                             
                         case 'ban':
@@ -329,11 +429,11 @@ async function handleWordFiltering(message, config) {
                     console.error(`Failed to apply filter action ${filterConfig.action}:`, actionError);
                 }
                 
-                return true; // Message was filtered/deleted
+                return true;
             }
         }
         
-        return false; // No filtered words found
+        return false;
     } catch (error) {
         console.error('Error in word filtering:', error);
         return false;
@@ -342,7 +442,6 @@ async function handleWordFiltering(message, config) {
 
 async function handleLeveling(message) {
     try {
-        // Check XP cooldown first
         if (isOnXPCooldown(message.author.id)) {
             console.log(`${message.author.tag} is on XP cooldown, skipping XP gain`);
             return;
@@ -352,7 +451,6 @@ async function handleLeveling(message) {
         const data = await getLevels();
         const guildId = message.guild.id;
         
-        // Ensure guild data structure exists
         if (!data.guilds) data.guilds = {};
         if (!data.guilds[guildId]) data.guilds[guildId] = {};
         if (!data.guilds[guildId][message.author.id]) {
@@ -367,7 +465,6 @@ async function handleLeveling(message) {
         const userData = data.guilds[guildId][message.author.id];
         const oldLevel = getLevel(userData.messages);
         
-        // Update user data
         userData.messages++;
         userData.totalMessages++;
         userData.lastActivity = new Date().toISOString();
@@ -376,21 +473,17 @@ async function handleLeveling(message) {
             time: userData.lastActivity
         });
 
-        // Keep only last 100 history entries to prevent data bloat
         if (userData.messageHistory.length > 100) {
             userData.messageHistory.shift();
         }
 
         const newLevel = getLevel(userData.messages);
         
-        // Set XP cooldown AFTER successful XP gain
         setXPCooldown(message.author.id);
         
-        // Save the updated data
         await saveLevels(data, `Updated XP for ${message.author.tag}`);
         console.log(`XP updated for ${message.author.tag}: ${userData.messages} messages, level ${newLevel} (cooldown set for 5s)`);
 
-        // Handle level up notification
         if (newLevel > oldLevel) {
             console.log(`Level up! ${message.author.tag} reached level ${newLevel}`);
             await handleLevelUp(message, userData, newLevel, oldLevel, data.guilds[guildId]);
@@ -403,10 +496,8 @@ async function handleLeveling(message) {
 
 async function handleLevelUp(message, userData, newLevel, oldLevel, guildData) {
     try {
-        // Handle automatic role management first
         await handleAutomaticRoleManagement(message, newLevel, oldLevel);
         
-        // Get updated config to check for level-up channel
         const config = await getConfig();
         const levelUpChannelId = config?.guilds?.[message.guild.id]?.levelUpChannel;
         let levelUpChannel;
@@ -415,26 +506,22 @@ async function handleLevelUp(message, userData, newLevel, oldLevel, guildData) {
             levelUpChannel = message.guild.channels.cache.get(levelUpChannelId);
         }
         
-        // If no specific channel is configured, use the current channel
         if (!levelUpChannel) {
             levelUpChannel = message.channel;
         }
 
-        // Create level up message (removed message remaining count as requested)
         const levelUpMessage = 
             `🌟 **Level Up!** ${message.author} just reached **Level ${newLevel}**! 🎉\n` +
             `📊 **Total Messages:** ${userData.messages}\n` +
             `⬆️ **Previous Level:** ${oldLevel}\n` +
             `💡 *Keep being active to level up faster!*`;
 
-        // Send the level up notification
         try {
             await levelUpChannel.send(levelUpMessage);
             console.log(`Level up notification sent to ${levelUpChannel.name}`);
         } catch (sendError) {
             console.error('Failed to send level up notification:', sendError);
             
-            // Try to send in the original channel if the configured channel failed
             if (levelUpChannel !== message.channel) {
                 try {
                     await message.channel.send(levelUpMessage);
@@ -445,7 +532,6 @@ async function handleLevelUp(message, userData, newLevel, oldLevel, guildData) {
             }
         }
         
-        // Optional: Add role rewards for certain levels
         await handleLevelRewards(message, newLevel, guildData);
         
     } catch (error) {
@@ -455,13 +541,11 @@ async function handleLevelUp(message, userData, newLevel, oldLevel, guildData) {
 
 async function handleLevelRewards(message, level, guildData) {
     try {
-        // Check if there are level rewards configured
         if (!guildData?.levelRewards) return;
         
         const rewards = guildData.levelRewards[level];
         if (!rewards) return;
         
-        // Handle role rewards
         if (rewards.roles && rewards.roles.length > 0) {
             for (const roleId of rewards.roles) {
                 const role = message.guild.roles.cache.get(roleId);
@@ -476,7 +560,6 @@ async function handleLevelRewards(message, level, guildData) {
             }
         }
         
-        // Handle other potential rewards (coins, items, etc.)
         if (rewards.message) {
             await message.channel.send(`🎁 **Level ${level} Reward:** ${rewards.message}`);
         }
@@ -486,22 +569,17 @@ async function handleLevelRewards(message, level, guildData) {
     }
 }
 
-// Helper function to calculate required messages for a level
 function getRequiredMessages(level) {
-    // This should match your XP system's calculation
-    // Adjust this based on your actual level calculation
-    return level * level * 100; // Example calculation
+    return level * level * 100;
 }
 
-// Automatic role management when users level up
 async function handleAutomaticRoleManagement(message, newLevel, oldLevel) {
     try {
-        // Get config to check for level roles
         const config = await getConfig();
         const levelRoles = config?.guilds?.[message.guild.id]?.levelRoles;
         
         if (!levelRoles || Object.keys(levelRoles).length === 0) {
-            return; // No level roles configured
+            return;
         }
 
         const member = message.member;
@@ -509,7 +587,6 @@ async function handleAutomaticRoleManagement(message, newLevel, oldLevel) {
         let addedRoles = [];
         let removedRoles = [];
 
-        // Remove old level roles (from levels 1 to oldLevel)
         for (let level = 1; level <= oldLevel; level++) {
             const roleId = levelRoles[level];
             if (roleId && member.roles.cache.has(roleId)) {
@@ -527,7 +604,6 @@ async function handleAutomaticRoleManagement(message, newLevel, oldLevel) {
             }
         }
 
-        // Add new level role (for the current level achieved)
         const newRoleId = levelRoles[newLevel];
         if (newRoleId && !member.roles.cache.has(newRoleId)) {
             const newRole = message.guild.roles.cache.get(newRoleId);
@@ -543,7 +619,6 @@ async function handleAutomaticRoleManagement(message, newLevel, oldLevel) {
             }
         }
 
-        // Log role changes for debugging
         if (rolesChanged) {
             console.log(`Role management for ${message.author.tag} level up ${oldLevel} → ${newLevel}:`);
             if (removedRoles.length > 0) {
