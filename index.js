@@ -9,6 +9,7 @@ const database = require('./src/utils/database');
 const github = require('./src/utils/github');
 
 const PORT = process.env.PORT || 3000;
+const ALLOWED_SERVER_ID = process.env.SERVER_ID; // Add this to your .env file
 
 const client = new Client({
     intents: [
@@ -89,6 +90,15 @@ const startHealthServer = () => {
 
 async function initialize() {
     try {
+        // Check if SERVER_ID is set
+        if (!ALLOWED_SERVER_ID) {
+            console.error('SERVER_ID not set in environment variables!');
+            console.error('Please add SERVER_ID=your_server_id to your .env file');
+            process.exit(1);
+        }
+        
+        console.log(`Bot restricted to server ID: ${ALLOWED_SERVER_ID}`);
+        
         const permissionsOk = await github.testPermissions();
         if (!permissionsOk) {
             console.error('GitHub setup required - check your token permissions');
@@ -161,6 +171,12 @@ for (const file of eventFiles) {
 }
 
 client.on('interactionCreate', async interaction => {
+    // SERVER ID CHECK - Block all interactions from other servers
+    if (!interaction.guild || interaction.guild.id !== ALLOWED_SERVER_ID) {
+        // Silently ignore - no response at all
+        return;
+    }
+
     if (interaction.isAutocomplete()) {
         const command = client.commands.get(interaction.commandName);
         
@@ -279,6 +295,7 @@ client.on('interactionCreate', async interaction => {
 client.once('ready', async () => {
     console.log(`Ready! Logged in as ${client.user.tag}`);
     console.log(`Serving ${client.guilds.cache.size} guilds`);
+    console.log(`✅ Bot restricted to server ID: ${ALLOWED_SERVER_ID}`);
     
     await registerCommands();
     
