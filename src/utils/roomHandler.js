@@ -561,6 +561,54 @@ async function handleStartGame(interaction, roomId) {
     }
 }
 
+async function handleGameSelect(interaction) {
+    try {
+        await interaction.deferUpdate();
+        
+        const selectedGame = interaction.values[0];
+        const roomId = interaction.message.id;
+        
+        const activeRooms = await github.getActiveRooms();
+        const room = activeRooms[roomId];
+        
+        if (!room) {
+            return await interaction.followUp({
+                content: '❌ Room not found!',
+                ephemeral: true
+            });
+        }
+        
+        if (room.ownerId !== interaction.user.id) {
+            return await interaction.followUp({
+                content: '❌ Only the room owner can select the game!',
+                ephemeral: true
+            });
+        }
+        
+        room.gameId = selectedGame;
+        await github.saveActiveRooms(activeRooms);
+        
+        await updateRoomEmbed(interaction.client, roomId, room);
+        
+        const game = GAMES[selectedGame];
+        await interaction.followUp({
+            content: `✅ Game set to: **${game.emoji} ${game.name}**`,
+            ephemeral: true
+        });
+        
+    } catch (error) {
+        console.error('Error handling game selection:', error);
+        try {
+            await interaction.followUp({
+                content: '❌ Error selecting game!',
+                ephemeral: true
+            });
+        } catch (e) {
+            console.error('Failed to send error message:', e);
+        }
+    }
+}
+
 module.exports = {
     updateRoomEmbed,
     handleJoinRoom,
@@ -574,5 +622,6 @@ module.exports = {
     handleRemovePassword,
     handleCancelRoom,
     handleStartGame,
+    handleGameSelect,
     GAMES
 };
