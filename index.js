@@ -232,8 +232,14 @@ client.on('interactionCreate', async interaction => {
         try {
             const customId = interaction.customId;
             
+            // Shop button
+            if (customId === 'buy_roomcard') {
+                const shopHandler = require('./src/commands/shop');
+                await shopHandler.handlePurchase(interaction, 'roomcard');
+            }
+            
             // Giveaway buttons
-            if (customId === 'giveaway_setup_btn') {
+            else if (customId === 'giveaway_setup_btn') {
                 const giveawayHandler = require('./src/commands/giveaway');
                 await giveawayHandler.handleSetupButton(interaction);
             }
