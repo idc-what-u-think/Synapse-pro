@@ -99,25 +99,12 @@ module.exports = {
 
             // Execute the ban
             await interaction.guild.members.ban(user, { 
-                deleteMessageDays: deleteDays,
+                deleteMessageSeconds: deleteDays * 24 * 60 * 60,
                 reason: `${reason} | Moderator: ${interaction.user.tag}`
             });
             
-            // Create modlog embed
-            const modlogEmbed = new EmbedBuilder()
-                .setColor(0xFF0000)
-                .setTitle('Member Banned')
-                .addFields(
-                    { name: 'User', value: `${user.tag} (${user.id})`, inline: true },
-                    { name: 'Moderator', value: `${interaction.user.tag}`, inline: true },
-                    { name: 'Delete Messages', value: `${deleteDays} days`, inline: true },
-                    { name: 'Reason', value: reason }
-                )
-                .setThumbnail(user.displayAvatarURL({ dynamic: true }))
-                .setTimestamp();
-
-            // Send to modlog
-            await sendModlogEmbed(interaction, modlogEmbed);
+            // Send to modlog with correct parameters
+            await sendModlogEmbed(interaction.guild, 'banned', user, interaction.user, reason);
             
             // Reply to interaction
             await interaction.reply({
