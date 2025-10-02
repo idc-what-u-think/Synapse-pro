@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Collection, Routes } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, Routes, EmbedBuilder } = require('discord.js');
 const { REST } = require('@discordjs/rest');
 const fs = require('fs');
 const path = require('path');
@@ -87,6 +87,45 @@ const startHealthServer = () => {
     });
 };
 
+async function checkReminders() {
+    try {
+        const data = await github.getData('data/reminders.json');
+        if (!data || !Array.isArray(data.reminders) || data.reminders.length === 0) {
+            return;
+        }
+
+        const now = Date.now();
+        const dueReminders = data.reminders.filter(r => r.reminderTime <= now);
+        
+        if (dueReminders.length === 0) return;
+
+        for (const reminder of dueReminders) {
+            try {
+                const channel = await client.channels.fetch(reminder.channelId);
+                const user = await client.users.fetch(reminder.userId);
+
+                const embed = new EmbedBuilder()
+                    .setTitle('⏰ Reminder!')
+                    .setDescription(reminder.message)
+                    .setColor(0xFFAA00)
+                    .setFooter({ text: `Set ${new Date(reminder.setAt).toLocaleString()}` })
+                    .setTimestamp();
+
+                await channel.send({ content: `${user}`, embeds: [embed] });
+                console.log(`Sent reminder to ${user.tag}`);
+            } catch (error) {
+                console.error('Error sending reminder:', error);
+            }
+        }
+
+        data.reminders = data.reminders.filter(r => r.reminderTime > now);
+        await github.saveData('data/reminders.json', data, 'Processed reminders');
+
+    } catch (error) {
+        console.error('Error checking reminders:', error);
+    }
+}
+
 async function initialize() {
     try {
         if (!ALLOWED_SERVER_ID) {
@@ -169,12 +208,10 @@ for (const file of eventFiles) {
 }
 
 client.on('interactionCreate', async interaction => {
-    // SERVER ID CHECK - Block all interactions from other servers
     if (!interaction.guild || interaction.guild.id !== ALLOWED_SERVER_ID) {
         return;
     }
 
-    // AUTOCOMPLETE
     if (interaction.isAutocomplete()) {
         const command = client.commands.get(interaction.commandName);
         
@@ -198,7 +235,6 @@ client.on('interactionCreate', async interaction => {
         return;
     }
 
-    // SLASH COMMANDS
     if (interaction.isChatInputCommand()) {
         const command = client.commands.get(interaction.commandName);
         if (!command) return;
@@ -227,18 +263,15 @@ client.on('interactionCreate', async interaction => {
         }
     }
     
-    // BUTTON INTERACTIONS
     else if (interaction.isButton()) {
         try {
             const customId = interaction.customId;
             
-            // Shop button
             if (customId === 'buy_roomcard') {
                 const shopHandler = require('./src/commands/shop');
                 await shopHandler.handlePurchase(interaction, 'roomcard');
             }
             
-            // Giveaway buttons
             else if (customId === 'giveaway_setup_btn') {
                 const giveawayHandler = require('./src/commands/giveaway');
                 await giveawayHandler.handleSetupButton(interaction);
@@ -249,7 +282,6 @@ client.on('interactionCreate', async interaction => {
                 await giveawayHandler.handleParticipate(interaction, giveawayId);
             }
             
-            // Room buttons
             else if (customId.startsWith('room_join_')) {
                 const roomId = customId.replace('room_join_', '');
                 await roomHandler.handleJoinRoom(interaction, roomId);
@@ -283,7 +315,6 @@ client.on('interactionCreate', async interaction => {
                 await roomHandler.handleStartGame(interaction, roomId);
             }
             
-            // Typing race config button
             else if (customId.startsWith('typing_config_')) {
                 const roomId = customId.replace('typing_config_', '');
                 const typingRace = require('./src/games/typingrace');
@@ -309,7 +340,6 @@ client.on('interactionCreate', async interaction => {
         }
     }
     
-    // SELECT MENU INTERACTIONS
     else if (interaction.isStringSelectMenu()) {
         try {
             const customId = interaction.customId;
@@ -337,34 +367,28 @@ client.on('interactionCreate', async interaction => {
         }
     }
     
-    // MODAL INTERACTIONS
     else if (interaction.isModalSubmit()) {
         try {
             const customId = interaction.customId;
             
-            // Login modal
             if (customId === 'login_modal') {
                 const loginHandler = require('./src/commands/login');
                 await loginHandler.handleLoginModal(interaction);
             } 
-            // Giveaway modal
             else if (customId === 'giveaway_setup_modal') {
                 const giveawayHandler = require('./src/commands/giveaway');
                 await giveawayHandler.handleSetupModal(interaction);
             }
             
-            // Room password verification
             else if (customId.startsWith('room_password_verify_')) {
                 const roomId = customId.replace('room_password_verify_', '');
                 await roomHandler.handleVerifyPassword(interaction, roomId);
             }
-            // Room new password
             else if (customId.startsWith('room_new_password_')) {
                 const roomId = customId.replace('room_new_password_', '');
                 await roomHandler.handleNewPassword(interaction, roomId);
             }
             
-            // Typing race rounds modal
             else if (customId.startsWith('typing_rounds_')) {
                 const roomId = customId.replace('typing_rounds_', '');
                 const typingRace = require('./src/games/typingrace');
@@ -402,6 +426,9 @@ client.once('ready', async () => {
     
     startHealthServer();
     startSelfPing();
+    
+    setInterval(() => checkReminders(), 60000);
+    console.log('Reminder checker started (every 60 seconds)');
 });
 
 client.on('error', error => {
