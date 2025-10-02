@@ -12,7 +12,13 @@ const FILE_PATHS = {
     levels: 'data/leveling/levels.json',
     timers: 'data/features/timers.json',
     active_giveaways: 'data/giveaways/active.json',
-    giveaway_history: 'data/giveaways/history.json'
+    giveaway_history: 'data/giveaways/history.json',
+    economy: 'data/economy/balances.json',
+    inventory: 'data/economy/inventory.json',
+    daily_cooldowns: 'data/economy/daily_cooldowns.json',
+    active_rooms: 'data/games/active_rooms.json',
+    game_rewards: 'data/games/rewards.json',
+    wyr_questions: 'data/games/wyr_questions.json'
 };
 
 async function initializeRepo(octokit, owner, repo) {
@@ -211,6 +217,75 @@ async function saveGiveawayHistory(giveawayHistory, message = 'Update giveaway h
     return await saveData('giveaway_history', giveawayHistory, message);
 }
 
+async function getEconomy() {
+    const data = await getData('economy');
+    return data || {};
+}
+
+async function saveEconomy(economy, message = 'Update economy') {
+    return await saveData('economy', economy, message);
+}
+
+async function getInventory() {
+    const data = await getData('inventory');
+    return data || {};
+}
+
+async function saveInventory(inventory, message = 'Update inventory') {
+    return await saveData('inventory', inventory, message);
+}
+
+async function getDailyCooldowns() {
+    const data = await getData('daily_cooldowns');
+    return data || {};
+}
+
+async function saveDailyCooldowns(cooldowns, message = 'Update daily cooldowns') {
+    return await saveData('daily_cooldowns', cooldowns, message);
+}
+
+async function getActiveRooms() {
+    const data = await getData('active_rooms');
+    return data || {};
+}
+
+async function saveActiveRooms(rooms, message = 'Update active rooms') {
+    return await saveData('active_rooms', rooms, message);
+}
+
+async function getGameRewards() {
+    const data = await getData('game_rewards');
+    return data || {
+        typing_race_round: { coins: 50, bucks: 0 },
+        wyr_winner: { coins: 300, bucks: 2 },
+        reaction_winner: { coins: 100, bucks: 1 }
+    };
+}
+
+async function saveGameRewards(rewards, message = 'Update game rewards') {
+    return await saveData('game_rewards', rewards, message);
+}
+
+async function getWYRQuestions() {
+    const data = await getData('wyr_questions');
+    if (!data || !data.questions || data.questions.length === 0) {
+        return {
+            questions: [
+                { optionA: "Have the ability to fly", optionB: "Have the ability to turn invisible" },
+                { optionA: "Live in a mansion in the city", optionB: "Live in a cabin in the woods" },
+                { optionA: "Always be 10 minutes late", optionB: "Always be 20 minutes early" },
+                { optionA: "Have unlimited money", optionB: "Have unlimited time" },
+                { optionA: "Never use social media again", optionB: "Never watch another movie or TV show" }
+            ]
+        };
+    }
+    return data;
+}
+
+async function saveWYRQuestions(questions, message = 'Update WYR questions') {
+    return await saveData('wyr_questions', questions, message);
+}
+
 async function testPermissions() {
     try {
         const { data: tokenData } = await octokit.rest.users.getAuthenticated();
@@ -270,6 +345,19 @@ module.exports = {
     saveActiveGiveaways,
     getGiveawayHistory,
     saveGiveawayHistory,
+    
+    getEconomy,
+    saveEconomy,
+    getInventory,
+    saveInventory,
+    getDailyCooldowns,
+    saveDailyCooldowns,
+    getActiveRooms,
+    saveActiveRooms,
+    getGameRewards,
+    saveGameRewards,
+    getWYRQuestions,
+    saveWYRQuestions,
     
     FILE_PATHS
 };
