@@ -348,6 +348,9 @@ client.on('interactionCreate', async interaction => {
                 const roomId = customId.replace('room_kick_select_', '');
                 await roomHandler.handleKickSelect(interaction, roomId);
             }
+            else if (customId === 'select_game') {
+                await roomHandler.handleGameSelect(interaction);
+            }
             else {
                 console.log(`Unhandled select menu: ${customId}`);
             }
