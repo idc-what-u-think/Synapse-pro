@@ -13,20 +13,15 @@ function formatTime(ms) {
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('xp')
-        .setDescription('Show detailed XP info for a user')
-        .addUserOption(option =>
-            option.setName('user')
-                .setDescription('User to check')
-                .setRequired(false)),
+        .setDescription('Show your detailed XP info'),
+    
     async execute(interaction) {
         try {
-            const user = interaction.options.getUser('user') || interaction.user;
+            const user = interaction.user;
             const guildId = interaction.guild.id;
             
-            // Use getLevels() instead of getData()
             const data = await getLevels();
             
-            // Update data structure to match your messageCreate.js format
             const userData = data?.guilds?.[guildId]?.[user.id] || { 
                 messages: 0, 
                 totalMessages: 0, 
@@ -39,8 +34,7 @@ module.exports = {
             const lastActivity = userData.lastActivity ? `<t:${Math.floor(new Date(userData.lastActivity).getTime()/1000)}:R>` : 'N/A';
             const level = getLevel(messages);
             const messagesForNext = getMessagesForNextLevel(messages);
-
-            // Calculate message rate (last 10 entries)
+            
             let gainRate = 'N/A';
             if (userData.messageHistory && userData.messageHistory.length >= 2) {
                 const sorted = userData.messageHistory.slice(-10);
@@ -48,18 +42,18 @@ module.exports = {
                 const last = sorted[sorted.length - 1];
                 const deltaMessages = last.messages - first.messages;
                 const deltaTime = new Date(last.time) - new Date(first.time);
+                
                 if (deltaTime > 0) {
                     gainRate = `${(deltaMessages / (deltaTime / 3600000)).toFixed(2)} msgs/hr`;
                 }
             }
-
-            // Estimate time to next level
+            
             let timeToNext = 'N/A';
             if (gainRate !== 'N/A' && parseFloat(gainRate)) {
                 const ratePerMs = parseFloat(gainRate) / 3600000;
                 timeToNext = formatTime(messagesForNext / ratePerMs);
             }
-
+            
             const embed = new EmbedBuilder()
                 .setColor(0x8e44ad)
                 .setTitle(`${user.username}'s Level Details`)
@@ -74,8 +68,8 @@ module.exports = {
                 )
                 .setThumbnail(user.displayAvatarURL())
                 .setTimestamp();
-
-            await interaction.reply({ embeds: [embed] });
+            
+            await interaction.reply({ embeds: [embed], ephemeral: true });
             
         } catch (error) {
             console.error('Error in XP command:', error);
