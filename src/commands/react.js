@@ -38,6 +38,7 @@ async function playGame(client, roomId, room) {
         await message.react(targetEmoji);
 
         const filter = (reaction, user) => {
+            if (!reaction || !reaction.emoji) return false;
             return reaction.emoji.name === targetEmoji && 
                    room.players.includes(user.id) && 
                    !user.bot;
@@ -46,66 +47,82 @@ async function playGame(client, roomId, room) {
         const collector = message.createReactionCollector({ filter, time: 60000, max: 1 });
 
         collector.on('collect', async (reaction, user) => {
-            const reactionUsers = await reaction.users.fetch();
-            const userReactions = reactionUsers.filter(u => room.players.includes(u.id) && !u.bot);
+            try {
+                const reactionUsers = await reaction.users.fetch();
+                const userReactions = reactionUsers.filter(u => room.players.includes(u.id) && !u.bot);
 
-            if (userReactions.size > 1) {
-                const tieEmbed = new EmbedBuilder()
-                    .setColor('#ffa500')
-                    .setTitle('🤝 It\'s a Tie!')
-                    .setDescription('Multiple players reacted at the same time! Try again...');
+                if (userReactions.size > 1) {
+                    const tieEmbed = new EmbedBuilder()
+                        .setColor('#ffa500')
+                        .setTitle('🤝 It\'s a Tie!')
+                        .setDescription('Multiple players reacted at the same time! Try again...');
 
-                await channel.send({ embeds: [tieEmbed] });
-                
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                return await playGame(client, roomId, room);
-            }
+                    await channel.send({ embeds: [tieEmbed] });
+                    
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    return await playGame(client, roomId, room);
+                }
 
-            const economy = await github.getEconomy();
-            const userId = user.id;
+                const economy = await github.getEconomy();
+                const userId = user.id;
 
-            if (!economy[userId]) {
-                economy[userId] = { coins: 0, bucks: 0 };
-            }
+                if (!economy[userId]) {
+                    economy[userId] = { coins: 0, bucks: 0 };
+                }
 
-            economy[userId].coins += rewards.reaction_winner.coins;
-            economy[userId].bucks += rewards.reaction_winner.bucks;
-            await github.saveEconomy(economy);
+                economy[userId].coins += rewards.reaction_winner.coins;
+                economy[userId].bucks += rewards.reaction_winner.bucks;
+                await github.saveEconomy(economy);
 
-            const winnerEmbed = new EmbedBuilder()
-                .setColor('#00ff00')
-                .setTitle('🏆 Winner!')
-                .setDescription(`${user} reacted first!`)
-                .addFields({
-                    name: 'Rewards',
-                    value: `🪙 ${rewards.reaction_winner.coins} Coins\n💵 ${rewards.reaction_winner.bucks} DMP Bucks`
-                });
+                const winnerEmbed = new EmbedBuilder()
+                    .setColor('#00ff00')
+                    .setTitle('🏆 Winner!')
+                    .setDescription(`${user} reacted first!`)
+                    .addFields({
+                        name: 'Rewards',
+                        value: `🪙 ${rewards.reaction_winner.coins} Coins\n💵 ${rewards.reaction_winner.bucks} DMP Bucks`
+                    });
 
-            await channel.send({ embeds: [winnerEmbed] });
-
-            const activeRooms = await github.getActiveRooms();
-            delete activeRooms[roomId];
-            await github.saveActiveRooms(activeRooms);
-
-            const roomMessage = await channel.messages.fetch(room.messageId);
-            await roomMessage.delete().catch(() => {});
-        });
-
-        collector.on('end', async collected => {
-            if (collected.size === 0) {
-                const timeoutEmbed = new EmbedBuilder()
-                    .setColor('#ff0000')
-                    .setTitle('⏰ Time\'s Up!')
-                    .setDescription('No one reacted in time!');
-
-                await channel.send({ embeds: [timeoutEmbed] });
+                await channel.send({ embeds: [winnerEmbed] });
 
                 const activeRooms = await github.getActiveRooms();
                 delete activeRooms[roomId];
                 await github.saveActiveRooms(activeRooms);
 
-                const roomMessage = await channel.messages.fetch(room.messageId);
-                await roomMessage.delete().catch(() => {});
+                try {
+                    const roomMessage = await channel.messages.fetch(room.messageId);
+                    await roomMessage.delete();
+                } catch (deleteError) {
+                    console.error('Error deleting room message:', deleteError);
+                }
+            } catch (collectError) {
+                console.error('Error processing reaction collection:', collectError);
+            }
+        });
+
+        collector.on('end', async collected => {
+            if (collected.size === 0) {
+                try {
+                    const timeoutEmbed = new EmbedBuilder()
+                        .setColor('#ff0000')
+                        .setTitle('⏰ Time\'s Up!')
+                        .setDescription('No one reacted in time!');
+
+                    await channel.send({ embeds: [timeoutEmbed] });
+
+                    const activeRooms = await github.getActiveRooms();
+                    delete activeRooms[roomId];
+                    await github.saveActiveRooms(activeRooms);
+
+                    try {
+                        const roomMessage = await channel.messages.fetch(room.messageId);
+                        await roomMessage.delete();
+                    } catch (deleteError) {
+                        console.error('Error deleting room message:', deleteError);
+                    }
+                } catch (endError) {
+                    console.error('Error in collector end handler:', endError);
+                }
             }
         });
 
