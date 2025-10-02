@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
-const { sendModlogMessage } = require('../utils/modlog'); // Your helper file
+const { sendModlogEmbed } = require('../utils/modlog');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -17,77 +17,73 @@ module.exports = {
 
     async execute(interaction) {
         try {
-            // IMPORTANT: Defer the reply immediately to prevent timeout
-            await interaction.deferReply({ ephemeral: true });
-
             const user = interaction.options.getUser('user');
-            const reason = interaction.options.getString('reason');
+            const reason = interaction.options.getString('reason') || 'No reason provided';
             const member = interaction.guild.members.cache.get(user.id);
 
-            // Check if member exists in guild
             if (!member) {
-                return await interaction.editReply({
-                    content: 'User not found in this server.'
+                return await interaction.reply({
+                    content: 'User not found in this server.',
+                    ephemeral: true
                 });
             }
 
-            // Check if user is kickable
-            if (!member.kickable) {
-                return await interaction.editReply({
-                    content: 'I cannot kick this user. They may have higher permissions than me.'
+            if (user.id === interaction.user.id) {
+                return await interaction.reply({
+                    content: 'You cannot kick yourself!',
+                    ephemeral: true
                 });
             }
 
-            // Check if moderator can kick this user
+            if (user.id === interaction.client.user.id) {
+                return await interaction.reply({
+                    content: 'I cannot kick myself!',
+                    ephemeral: true
+                });
+            }
+
+            const botMember = await interaction.guild.members.fetch(interaction.client.user.id);
+            if (member.roles.highest.position >= botMember.roles.highest.position) {
+                return await interaction.reply({
+                    content: 'I cannot kick this user due to role hierarchy!',
+                    ephemeral: true
+                });
+            }
+
             if (member.roles.highest.position >= interaction.member.roles.highest.position && interaction.user.id !== interaction.guild.ownerId) {
-                return await interaction.editReply({
-                    content: 'You cannot kick this user due to role hierarchy.'
+                return await interaction.reply({
+                    content: 'You cannot kick this user due to role hierarchy!',
+                    ephemeral: true
                 });
             }
 
-            // Perform the kick
-            try {
-                await member.kick(reason || 'No reason provided');
-                console.log(`${user.tag} kicked by ${interaction.user.tag}`);
-                
-                // Send modlog (this runs in background, won't delay the response)
-                sendModlogMessage(interaction.guild, 'Kicked', user, interaction.user, reason)
-                    .catch(err => console.error('Modlog error:', err));
+            await member.kick(`${reason} | Moderator: ${interaction.user.tag}`);
+            
+            await sendModlogEmbed(interaction.guild, 'kicked', user, interaction.user, reason);
 
-                // Respond to the interaction
-                let responseMessage = `✅ ${user.tag} has been kicked`;
-                if (reason) {
-                    responseMessage += ` for: ${reason}`;
-                }
-
-                await interaction.editReply({
-                    content: responseMessage
-                });
-
-            } catch (kickError) {
-                console.error('Error kicking user:', kickError);
-                await interaction.editReply({
-                    content: 'Failed to kick the user. Please check my permissions.'
-                });
-            }
+            await interaction.reply({
+                content: `✅ Successfully kicked ${user.tag}\n**Reason:** ${reason}`,
+                ephemeral: true
+            });
 
         } catch (error) {
-            console.error('Kick command error:', error);
+            console.error('Error in kick command:', error);
             
-            // Handle case where interaction hasn't been replied to yet
-            try {
-                if (!interaction.replied && !interaction.deferred) {
-                    await interaction.reply({
-                        content: 'An error occurred while executing the kick command.',
-                        ephemeral: true
-                    });
-                } else {
-                    await interaction.editReply({
-                        content: 'An error occurred while executing the kick command.'
-                    });
-                }
-            } catch (replyError) {
-                console.error('Error sending error response:', replyError);
+            if (error.code === 50013) {
+                await interaction.reply({
+                    content: 'I don\'t have permission to kick this user!',
+                    ephemeral: true
+                });
+            } else if (error.code === 10007) {
+                await interaction.reply({
+                    content: 'User not found!',
+                    ephemeral: true
+                });
+            } else {
+                await interaction.reply({
+                    content: 'An error occurred while trying to kick the user. Please try again.',
+                    ephemeral: true
+                });
             }
         }
     },
