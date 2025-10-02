@@ -7,9 +7,10 @@ const https = require('https');
 const http = require('http');
 const database = require('./src/utils/database');
 const github = require('./src/utils/github');
+const roomHandler = require('./src/utils/roomHandler');
 
 const PORT = process.env.PORT || 3000;
-const ALLOWED_SERVER_ID = process.env.SERVER_ID; // Add this to your .env file
+const ALLOWED_SERVER_ID = process.env.SERVER_ID;
 
 const client = new Client({
     intents: [
@@ -51,9 +52,7 @@ const startSelfPing = () => {
             }
         });
 
-        req.on('error', () => {
-        });
-
+        req.on('error', () => {});
         req.on('timeout', () => {
             req.destroy();
         });
@@ -90,7 +89,6 @@ const startHealthServer = () => {
 
 async function initialize() {
     try {
-        // Check if SERVER_ID is set
         if (!ALLOWED_SERVER_ID) {
             console.error('SERVER_ID not set in environment variables!');
             console.error('Please add SERVER_ID=your_server_id to your .env file');
@@ -173,10 +171,10 @@ for (const file of eventFiles) {
 client.on('interactionCreate', async interaction => {
     // SERVER ID CHECK - Block all interactions from other servers
     if (!interaction.guild || interaction.guild.id !== ALLOWED_SERVER_ID) {
-        // Silently ignore - no response at all
         return;
     }
 
+    // AUTOCOMPLETE
     if (interaction.isAutocomplete()) {
         const command = client.commands.get(interaction.commandName);
         
@@ -200,6 +198,7 @@ client.on('interactionCreate', async interaction => {
         return;
     }
 
+    // SLASH COMMANDS
     if (interaction.isChatInputCommand()) {
         const command = client.commands.get(interaction.commandName);
         if (!command) return;
@@ -228,10 +227,12 @@ client.on('interactionCreate', async interaction => {
         }
     }
     
+    // BUTTON INTERACTIONS
     else if (interaction.isButton()) {
         try {
             const customId = interaction.customId;
             
+            // Giveaway buttons
             if (customId === 'giveaway_setup_btn') {
                 const giveawayHandler = require('./src/commands/giveaway');
                 await giveawayHandler.handleSetupButton(interaction);
@@ -241,6 +242,48 @@ client.on('interactionCreate', async interaction => {
                 const giveawayHandler = require('./src/commands/giveaway');
                 await giveawayHandler.handleParticipate(interaction, giveawayId);
             }
+            
+            // Room buttons
+            else if (customId.startsWith('room_join_')) {
+                const roomId = customId.replace('room_join_', '');
+                await roomHandler.handleJoinRoom(interaction, roomId);
+            }
+            else if (customId.startsWith('room_leave_')) {
+                const roomId = customId.replace('room_leave_', '');
+                await roomHandler.handleLeaveRoom(interaction, roomId);
+            }
+            else if (customId.startsWith('room_kick_')) {
+                const roomId = customId.replace('room_kick_', '');
+                await roomHandler.handleKickPlayer(interaction, roomId);
+            }
+            else if (customId.startsWith('room_settings_')) {
+                const roomId = customId.replace('room_settings_', '');
+                await roomHandler.handleRoomSettings(interaction, roomId);
+            }
+            else if (customId.startsWith('room_change_password_')) {
+                const roomId = customId.replace('room_change_password_', '');
+                await roomHandler.handleChangePassword(interaction, roomId);
+            }
+            else if (customId.startsWith('room_remove_password_')) {
+                const roomId = customId.replace('room_remove_password_', '');
+                await roomHandler.handleRemovePassword(interaction, roomId);
+            }
+            else if (customId.startsWith('room_cancel_')) {
+                const roomId = customId.replace('room_cancel_', '');
+                await roomHandler.handleCancelRoom(interaction, roomId);
+            }
+            else if (customId.startsWith('room_start_')) {
+                const roomId = customId.replace('room_start_', '');
+                await roomHandler.handleStartGame(interaction, roomId);
+            }
+            
+            // Typing race config button
+            else if (customId.startsWith('typing_config_')) {
+                const roomId = customId.replace('typing_config_', '');
+                const typingRace = require('./src/games/typingrace');
+                await typingRace.handleConfig(interaction, roomId);
+            }
+            
             else {
                 console.log(`Unhandled button: ${customId}`);
             }
@@ -260,18 +303,68 @@ client.on('interactionCreate', async interaction => {
         }
     }
     
+    // SELECT MENU INTERACTIONS
+    else if (interaction.isStringSelectMenu()) {
+        try {
+            const customId = interaction.customId;
+            
+            if (customId.startsWith('room_kick_select_')) {
+                const roomId = customId.replace('room_kick_select_', '');
+                await roomHandler.handleKickSelect(interaction, roomId);
+            }
+            else {
+                console.log(`Unhandled select menu: ${customId}`);
+            }
+        } catch (error) {
+            console.error('Select menu interaction error:', error);
+            
+            try {
+                if (!interaction.replied && !interaction.deferred) {
+                    await interaction.reply({ 
+                        content: '❌ There was an error processing this selection!', 
+                        ephemeral: true 
+                    });
+                }
+            } catch (replyError) {
+                console.error('Failed to send select menu error reply:', replyError);
+            }
+        }
+    }
+    
+    // MODAL INTERACTIONS
     else if (interaction.isModalSubmit()) {
         try {
             const customId = interaction.customId;
             
+            // Login modal
             if (customId === 'login_modal') {
                 const loginHandler = require('./src/commands/login');
                 await loginHandler.handleLoginModal(interaction);
             } 
+            // Giveaway modal
             else if (customId === 'giveaway_setup_modal') {
                 const giveawayHandler = require('./src/commands/giveaway');
                 await giveawayHandler.handleSetupModal(interaction);
             }
+            
+            // Room password verification
+            else if (customId.startsWith('room_password_verify_')) {
+                const roomId = customId.replace('room_password_verify_', '');
+                await roomHandler.handleVerifyPassword(interaction, roomId);
+            }
+            // Room new password
+            else if (customId.startsWith('room_new_password_')) {
+                const roomId = customId.replace('room_new_password_', '');
+                await roomHandler.handleNewPassword(interaction, roomId);
+            }
+            
+            // Typing race rounds modal
+            else if (customId.startsWith('typing_rounds_')) {
+                const roomId = customId.replace('typing_rounds_', '');
+                const typingRace = require('./src/games/typingrace');
+                await typingRace.handleRoundsModal(interaction, roomId);
+            }
+            
             else {
                 console.log(`Unhandled modal: ${customId}`);
             }
