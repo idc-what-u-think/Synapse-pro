@@ -1,4 +1,5 @@
 const { getConfig } = require('./github');
+const { EmbedBuilder } = require('discord.js');
 
 async function getModlogChannel(guild) {
     try {
@@ -15,12 +16,12 @@ async function sendModlogMessage(guild, action, user, moderator, reason = null) 
     try {
         const modlogChannel = await getModlogChannel(guild);
         if (modlogChannel) {
-            // Create simple message format
+            // Create simple message format with user mention
             let message;
             if (reason) {
-                message = `${user.tag} has been ${action.toLowerCase()} by ${moderator.tag} for ${reason}`;
+                message = `${user} has been ${action.toLowerCase()} by ${moderator.tag} for ${reason}`;
             } else {
-                message = `${user.tag} has been ${action.toLowerCase()} by ${moderator.tag}`;
+                message = `${user} has been ${action.toLowerCase()} by ${moderator.tag}`;
             }
             
             await modlogChannel.send(message);
@@ -33,18 +34,15 @@ async function sendModlogMessage(guild, action, user, moderator, reason = null) 
     }
 }
 
-// Alternative function if you want to keep using embeds but with simple format
 async function sendModlogEmbed(guild, action, user, moderator, reason = null) {
     try {
         const modlogChannel = await getModlogChannel(guild);
         if (modlogChannel) {
-            const { EmbedBuilder } = require('discord.js');
-            
             let description;
             if (reason) {
-                description = `${user.tag} has been ${action.toLowerCase()} by ${moderator.tag} for ${reason}`;
+                description = `${user} has been ${action.toLowerCase()} by ${moderator.tag} for ${reason}`;
             } else {
-                description = `${user.tag} has been ${action.toLowerCase()} by ${moderator.tag}`;
+                description = `${user} has been ${action.toLowerCase()} by ${moderator.tag}`;
             }
             
             const embed = new EmbedBuilder()
@@ -64,12 +62,24 @@ async function sendModlogEmbed(guild, action, user, moderator, reason = null) {
 
 function getActionColor(action) {
     switch (action.toLowerCase()) {
-        case 'ban': return 0xFF0000; // Red
-        case 'kick': return 0xFF8C00; // Orange
-        case 'mute': return 0xFFFF00; // Yellow
-        case 'timeout': return 0xFFFF00; // Yellow
-        case 'warn': return 0xFFA500; // Orange
-        default: return 0x808080; // Gray
+        case 'ban':
+        case 'banned':
+            return 0xFF0000; // Red
+        case 'kick':
+        case 'kicked':
+            return 0xFF8C00; // Orange
+        case 'mute':
+        case 'muted':
+        case 'timeout':
+            return 0xFFFF00; // Yellow
+        case 'warn':
+        case 'warned':
+            return 0xFFA500; // Orange
+        case 'unban':
+        case 'unbanned':
+            return 0x00FF00; // Green
+        default:
+            return 0x808080; // Gray
     }
 }
 
