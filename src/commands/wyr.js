@@ -74,34 +74,50 @@ async function playGame(client, roomId, room) {
 
             const votes = { a: [], b: [] };
 
-            const collector = message.createMessageComponentCollector({ time: 30000 });
+            const filter = i => {
+                return i.customId.startsWith(`wyr_vote_`) && 
+                       i.customId.includes(`_${roomId}_${round}`);
+            };
+
+            const collector = message.createMessageComponentCollector({ 
+                filter,
+                time: 30000 
+            });
 
             collector.on('collect', async i => {
-                if (!survivors.includes(i.user.id)) {
-                    return await i.reply({
-                        content: '❌ You have been eliminated!',
+                try {
+                    if (!survivors.includes(i.user.id)) {
+                        return await i.reply({
+                            content: '❌ You have been eliminated!',
+                            ephemeral: true
+                        });
+                    }
+
+                    const choice = i.customId.includes('_a_') ? 'a' : 'b';
+
+                    votes.a = votes.a.filter(id => id !== i.user.id);
+                    votes.b = votes.b.filter(id => id !== i.user.id);
+
+                    votes[choice].push(i.user.id);
+
+                    await i.reply({
+                        content: `✅ You voted for Option ${choice.toUpperCase()}!`,
                         ephemeral: true
                     });
+                } catch (collectError) {
+                    console.error('Error processing vote:', collectError);
                 }
-
-                const choice = i.customId.includes('_a_') ? 'a' : 'b';
-
-                votes.a = votes.a.filter(id => id !== i.user.id);
-                votes.b = votes.b.filter(id => id !== i.user.id);
-
-                votes[choice].push(i.user.id);
-
-                await i.reply({
-                    content: `✅ You voted for Option ${choice.toUpperCase()}!`,
-                    ephemeral: true
-                });
             });
 
             await new Promise(resolve => {
                 collector.on('end', resolve);
             });
 
-            await message.edit({ components: [] });
+            try {
+                await message.edit({ components: [] });
+            } catch (editError) {
+                console.error('Error disabling buttons:', editError);
+            }
 
             const notVoted = survivors.filter(id => !votes.a.includes(id) && !votes.b.includes(id));
             const votedA = votes.a.length;
@@ -204,8 +220,12 @@ async function playGame(client, roomId, room) {
         delete activeRooms[roomId];
         await github.saveActiveRooms(activeRooms);
 
-        const message = await channel.messages.fetch(room.messageId);
-        await message.delete().catch(() => {});
+        try {
+            const message = await channel.messages.fetch(room.messageId);
+            await message.delete();
+        } catch (deleteError) {
+            console.error('Error deleting room message:', deleteError);
+        }
 
     } catch (error) {
         console.error('Error in WYR game:', error);
