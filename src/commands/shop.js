@@ -79,6 +79,9 @@ module.exports = {
         const item = SHOP_ITEMS[itemId];
 
         try {
+            // Defer reply immediately to prevent timeout
+            await interaction.deferReply({ ephemeral: true });
+
             const economy = await github.getEconomy();
             const inventory = await github.getInventory();
 
@@ -91,9 +94,8 @@ module.exports = {
             }
 
             if (economy[userId].bucks < item.price) {
-                return await interaction.reply({
-                    content: `❌ You don't have enough DMP Bucks!\n\nYour balance: **${economy[userId].bucks} DMP Bucks**\nRequired: **${item.price} DMP Bucks**`,
-                    ephemeral: true
+                return await interaction.editReply({
+                    content: `❌ You don't have enough DMP Bucks!\n\nYour balance: **${economy[userId].bucks} DMP Bucks**\nRequired: **${item.price} DMP Bucks**`
                 });
             }
 
@@ -125,14 +127,18 @@ module.exports = {
                 .setFooter({ text: 'Use /inventory to see your items' })
                 .setTimestamp();
 
-            await interaction.reply({ embeds: [embed], ephemeral: true });
+            await interaction.editReply({ embeds: [embed] });
 
         } catch (error) {
             console.error('Error in purchase:', error);
-            await interaction.reply({
-                content: '❌ An error occurred during the purchase.',
-                ephemeral: true
-            });
+            
+            try {
+                await interaction.editReply({
+                    content: '❌ An error occurred during the purchase.'
+                });
+            } catch (editError) {
+                console.error('Failed to edit reply:', editError);
+            }
         }
     }
 };
