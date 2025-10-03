@@ -314,6 +314,16 @@ client.on('interactionCreate', async interaction => {
                 const roomId = customId.replace('room_start_', '');
                 await roomHandler.handleStartGame(interaction, roomId);
             }
+            else if (customId.startsWith('room_add_password_')) {
+                const gameId = customId.replace('room_add_password_', '');
+                const useCommand = require('./src/commands/use');
+                await useCommand.handlePasswordButton(interaction, gameId, true);
+            }
+            else if (customId.startsWith('room_no_password_')) {
+                const gameId = customId.replace('room_no_password_', '');
+                const useCommand = require('./src/commands/use');
+                await useCommand.handlePasswordButton(interaction, gameId, false);
+            }
             
             else if (customId.startsWith('typing_config_')) {
                 const roomId = customId.replace('typing_config_', '');
@@ -349,7 +359,8 @@ client.on('interactionCreate', async interaction => {
                 await roomHandler.handleKickSelect(interaction, roomId);
             }
             else if (customId === 'select_game') {
-                await roomHandler.handleGameSelect(interaction);
+                const useCommand = require('./src/commands/use');
+                await useCommand.handleGameSelection(interaction);
             }
             else {
                 console.log(`Unhandled select menu: ${customId}`);
@@ -390,6 +401,11 @@ client.on('interactionCreate', async interaction => {
             else if (customId.startsWith('room_new_password_')) {
                 const roomId = customId.replace('room_new_password_', '');
                 await roomHandler.handleNewPassword(interaction, roomId);
+            }
+            else if (customId.startsWith('room_password_modal_')) {
+                const gameId = customId.replace('room_password_modal_', '');
+                const useCommand = require('./src/commands/use');
+                await useCommand.handlePasswordModal(interaction, gameId);
             }
             
             else if (customId.startsWith('typing_rounds_')) {
