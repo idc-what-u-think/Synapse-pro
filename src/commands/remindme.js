@@ -40,7 +40,6 @@ module.exports = {
 
             data.reminders.push({
                 userId: interaction.user.id,
-                channelId: interaction.channelId,
                 message,
                 reminderTime,
                 setAt: Date.now(),
