@@ -58,7 +58,8 @@ module.exports = {
                 });
             }
 
-            if (activeRooms[userId]) {
+            const userHasActiveRoom = Object.values(activeRooms).some(room => room.ownerId === userId);
+            if (userHasActiveRoom) {
                 return await interaction.reply({
                     content: '❌ You already have an active room! Close it before creating a new one.',
                     ephemeral: true
@@ -111,55 +112,56 @@ module.exports = {
         const gameId = interaction.values[0];
         const game = GAMES[gameId];
 
-        const passwordButton = new ButtonBuilder()
-            .setCustomId('room_add_password')
-            .setLabel('Add Password')
-            .setEmoji('🔒')
-            .setStyle(ButtonStyle.Secondary);
+        try {
+            const passwordButton = new ButtonBuilder()
+                .setCustomId(`room_add_password_${gameId}`)
+                .setLabel('Add Password')
+                .setEmoji('🔒')
+                .setStyle(ButtonStyle.Secondary);
 
-        const noPasswordButton = new ButtonBuilder()
-            .setCustomId('room_no_password')
-            .setLabel('No Password')
-            .setEmoji('🔓')
-            .setStyle(ButtonStyle.Primary);
+            const noPasswordButton = new ButtonBuilder()
+                .setCustomId(`room_no_password_${gameId}`)
+                .setLabel('No Password')
+                .setEmoji('🔓')
+                .setStyle(ButtonStyle.Primary);
 
-        const row = new ActionRowBuilder().addComponents(passwordButton, noPasswordButton);
+            const row = new ActionRowBuilder().addComponents(passwordButton, noPasswordButton);
 
-        await interaction.update({
-            content: `${game.emoji} **${game.name}** selected!\n\nWould you like to add a password to your room?`,
-            components: [row],
-            ephemeral: true
-        });
+            await interaction.update({
+                content: `${game.emoji} **${game.name}** selected!\n\nWould you like to add a password to your room?`,
+                components: [row]
+            });
 
-        const filter = i => i.user.id === userId;
-        const collector = interaction.channel.createMessageComponentCollector({ filter, time: 60000, max: 1 });
+        } catch (error) {
+            console.error('Error handling game selection:', error);
+        }
+    },
 
-        collector.on('collect', async i => {
-            if (i.customId === 'room_add_password') {
-                const modal = new ModalBuilder()
-                    .setCustomId(`room_password_modal_${gameId}`)
-                    .setTitle('Set Room Password');
+    async handlePasswordButton(interaction, gameId, hasPassword) {
+        if (hasPassword) {
+            const modal = new ModalBuilder()
+                .setCustomId(`room_password_modal_${gameId}`)
+                .setTitle('Set Room Password');
 
-                const passwordInput = new TextInputBuilder()
-                    .setCustomId('password')
-                    .setLabel('Enter Room Password')
-                    .setStyle(TextInputStyle.Short)
-                    .setRequired(true)
-                    .setMinLength(1)
-                    .setMaxLength(50);
+            const passwordInput = new TextInputBuilder()
+                .setCustomId('password')
+                .setLabel('Enter Room Password')
+                .setStyle(TextInputStyle.Short)
+                .setRequired(true)
+                .setMinLength(1)
+                .setMaxLength(50);
 
-                const actionRow = new ActionRowBuilder().addComponents(passwordInput);
-                modal.addComponents(actionRow);
+            const actionRow = new ActionRowBuilder().addComponents(passwordInput);
+            modal.addComponents(actionRow);
 
-                await i.showModal(modal);
-            } else if (i.customId === 'room_no_password') {
-                await this.createRoom(i, gameId, null);
-            }
-        });
+            await interaction.showModal(modal);
+        } else {
+            await this.createRoom(interaction, gameId, null);
+        }
     },
 
     async handlePasswordModal(interaction, gameId) {
-        const password = interaction.fields.getFieldValue('password');
+        const password = interaction.fields.getTextInputValue('password');
         await this.createRoom(interaction, gameId, password);
     },
 
@@ -258,17 +260,39 @@ module.exports = {
 
             await github.saveActiveRooms(activeRooms);
 
-            await interaction.reply({
-                content: '✅ Room created successfully!',
-                ephemeral: true
-            });
+            const replyContent = password 
+                ? `✅ Room created successfully with password: **${password}**`
+                : '✅ Room created successfully!';
+
+            if (interaction.replied || interaction.deferred) {
+                await interaction.followUp({
+                    content: replyContent,
+                    ephemeral: true
+                });
+            } else {
+                await interaction.reply({
+                    content: replyContent,
+                    ephemeral: true
+                });
+            }
 
         } catch (error) {
             console.error('Error creating room:', error);
-            await interaction.reply({
+            
+            const errorMessage = {
                 content: '❌ An error occurred while creating the room.',
                 ephemeral: true
-            });
+            };
+
+            try {
+                if (interaction.replied || interaction.deferred) {
+                    await interaction.followUp(errorMessage);
+                } else {
+                    await interaction.reply(errorMessage);
+                }
+            } catch (e) {
+                console.error('Failed to send error message:', e);
+            }
         }
     }
 };
