@@ -536,28 +536,40 @@ async function handleStartGame(interaction, roomId) {
 
         await updateRoomEmbed(interaction.client, roomId, room);
 
-        await interaction.reply({
-            content: '✅ Starting game...',
-            ephemeral: true
-        });
+        // Defer the interaction update before starting the game
+        await interaction.deferUpdate();
 
+        // Start the game and pass the interaction
         if (room.gameId === 'typing_race') {
             const typingRace = require('../games/typingrace');
-            await typingRace.startGame(interaction.client, roomId, room);
+            await typingRace.startGame(interaction.client, roomId, room, interaction);
         } else if (room.gameId === 'wyr') {
             const wyr = require('../games/wyr');
-            await wyr.startGame(interaction.client, roomId, room);
+            await wyr.startGame(interaction.client, roomId, room, interaction);
         } else if (room.gameId === 'reaction') {
             const reaction = require('../games/reaction');
-            await reaction.startGame(interaction.client, roomId, room);
+            await reaction.startGame(interaction.client, roomId, room, interaction);
         }
 
     } catch (error) {
         console.error('Error starting game:', error);
-        await interaction.reply({
-            content: '❌ An error occurred while starting the game.',
-            ephemeral: true
-        });
+        
+        // Only try to reply if we haven't acknowledged the interaction yet
+        try {
+            if (!interaction.replied && !interaction.deferred) {
+                await interaction.reply({
+                    content: '❌ An error occurred while starting the game.',
+                    ephemeral: true
+                });
+            } else if (interaction.deferred) {
+                await interaction.followUp({
+                    content: '❌ An error occurred while starting the game.',
+                    ephemeral: true
+                });
+            }
+        } catch (replyError) {
+            console.error('Failed to send error message:', replyError);
+        }
     }
 }
 
