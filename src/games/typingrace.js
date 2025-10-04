@@ -121,10 +121,20 @@ async function playRounds(client, roomId, totalRounds) {
         const activeRooms = await github.getActiveRooms();
         const room = activeRooms[roomId];
 
-        if (!room) return;
+        if (!room) {
+            console.error('Room not found:', roomId);
+            return;
+        }
 
         const channel = await client.channels.fetch(room.channelId);
         const rewards = await github.getGameRewards();
+        
+        console.log('Game rewards loaded:', rewards);
+        
+        if (!rewards || !rewards.typing_race_round) {
+            console.error('Invalid rewards structure:', rewards);
+            return;
+        }
 
         for (let round = 1; round <= totalRounds; round++) {
             // Determine difficulty based on round
