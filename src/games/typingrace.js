@@ -45,7 +45,7 @@ async function generatePhrase(difficulty = 'medium') {
     }
 }
 
-async function startGame(client, roomId, room) {
+async function startGame(client, roomId, room, interaction) {
     try {
         const channel = await client.channels.fetch(room.channelId);
         
@@ -63,6 +63,11 @@ async function startGame(client, roomId, room) {
             .setDescription('Click below to set the number of rounds (3-6)');
 
         await channel.send({ embeds: [embed], components: [row] });
+        
+        // Acknowledge the interaction if provided
+        if (interaction && !interaction.replied && !interaction.deferred) {
+            await interaction.deferUpdate();
+        }
 
     } catch (error) {
         console.error('Error starting typing race:', error);
