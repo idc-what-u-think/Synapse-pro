@@ -89,17 +89,22 @@ async function playGame(client, roomId, room) {
         const embed = new EmbedBuilder()
             .setColor('#ff6600')
             .setTitle('⚡ Fast Reaction Challenge!')
-            .setDescription(challengeText)
+            .setDescription(`${challengeText}\n\n**React with:** ${targetEmoji}`)
             .setFooter({ text: 'First person to react wins!' });
             
         const message = await channel.send({ embeds: [embed] });
-        await message.react(targetEmoji);
+        
+        // Don't add bot reaction - let players react first!
         
         const filter = (reaction, user) => {
             if (!reaction || !reaction.emoji) return false;
-            return reaction.emoji.name === targetEmoji && 
-                   room.players.includes(user.id) && 
-                   !user.bot;
+            const isCorrectEmoji = reaction.emoji.name === targetEmoji;
+            const isPlayer = room.players.includes(user.id);
+            const notBot = !user.bot;
+            
+            console.log(`Reaction from ${user.tag}: ${reaction.emoji.name}, Correct: ${isCorrectEmoji}, Player: ${isPlayer}, Not Bot: ${notBot}`);
+            
+            return isCorrectEmoji && isPlayer && notBot;
         };
         
         const collector = message.createReactionCollector({ filter, time: 60000, max: 1 });
