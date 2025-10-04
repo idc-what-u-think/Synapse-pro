@@ -178,6 +178,9 @@ function getSystemPrompt(mode) {
 
 module.exports = {
     name: Events.MessageCreate,
+    // Export AI functions for use in other modules
+    getAIInstance: getNextAIInstance,
+    GEMINI_KEYS,
     async execute(message, client) {
         if (message.author.bot) return;
         if (!message.guild) return;
