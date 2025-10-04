@@ -255,11 +255,16 @@ async function playRounds(client, roomId, totalRounds) {
 
             await channel.send({ embeds: [embed] });
 
-            const filter = m => room.players.includes(m.author.id) && m.content === phrase;
+            const filter = m => room.players.includes(m.author.id) && m.content.toLowerCase() === phrase.toLowerCase();
             const collector = channel.createMessageCollector({ filter, time: 120000, max: 1 });
 
             const roundResult = await new Promise(resolve => {
+                let resolved = false;
+
                 collector.on('collect', async message => {
+                    if (resolved) return;
+                    resolved = true;
+
                     try {
                         const economy = await github.getEconomy();
                         const userId = message.author.id;
@@ -288,8 +293,9 @@ async function playRounds(client, roomId, totalRounds) {
                     }
                 });
 
-                collector.on('end', collected => {
-                    if (collected.size === 0) {
+                collector.on('end', (collected, reason) => {
+                    if (!resolved) {
+                        resolved = true;
                         resolve(false);
                     }
                 });
