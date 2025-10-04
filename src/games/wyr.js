@@ -1,5 +1,98 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const github = require('../utils/github');
+
+const GEMINI_KEYS = [
+    process.env.GEMINI_API_KEY_1,
+    process.env.GEMINI_API_KEY_2,
+    process.env.GEMINI_API_KEY_3,
+    process.env.GEMINI_API_KEY_4,
+    process.env.GEMINI_API_KEY_5
+].filter(key => key);
+
+const aiInstances = GEMINI_KEYS.map((key, index) => {
+    const genAI = new GoogleGenerativeAI(key);
+    return {
+        model: genAI.getGenerativeModel({ model: 'gemini-2.5-flash' }),
+        key: key.substring(0, 8) + '...',
+        index: index + 1
+    };
+});
+
+let currentKeyIndex = 0;
+
+function getNextAIInstance() {
+    if (aiInstances.length === 0) {
+        throw new Error('No Gemini API keys available');
+    }
+    
+    const instance = aiInstances[currentKeyIndex];
+    currentKeyIndex = (currentKeyIndex + 1) % aiInstances.length;
+    return instance;
+}
+
+async function generateWYRQuestion() {
+    try {
+        const aiInstance = getNextAIInstance();
+        
+        const prompt = `Generate a single "Would You Rather" question with two interesting and balanced options. 
+        
+Rules:
+- Make it fun, engaging, and appropriate for all ages
+- Both options should be equally appealing/difficult to choose
+- Keep each option concise (under 50 characters)
+- Be creative and varied (superpowers, lifestyle, choices, scenarios, etc.)
+- No offensive, inappropriate, or harmful content
+
+Format your response EXACTLY like this (no extra text):
+Option A: [your first option]
+Option B: [your second option]
+
+Example:
+Option A: Have the ability to fly
+Option B: Have the ability to turn invisible`;
+
+        const result = await aiInstance.model.generateContent(prompt);
+        const responseText = result.response.text().trim();
+        
+        // Parse the response
+        const lines = responseText.split('\n').filter(line => line.trim());
+        let optionA = '';
+        let optionB = '';
+        
+        for (const line of lines) {
+            if (line.startsWith('Option A:')) {
+                optionA = line.replace('Option A:', '').trim();
+            } else if (line.startsWith('Option B:')) {
+                optionB = line.replace('Option B:', '').trim();
+            }
+        }
+        
+        if (!optionA || !optionB) {
+            throw new Error('Failed to parse AI response');
+        }
+        
+        console.log(`Generated WYR question: A: "${optionA}" vs B: "${optionB}"`);
+        
+        return { optionA, optionB };
+        
+    } catch (error) {
+        console.error('Error generating WYR question:', error);
+        
+        // Fallback questions if AI fails
+        const fallbackQuestions = [
+            { optionA: "Have the ability to fly", optionB: "Have the ability to turn invisible" },
+            { optionA: "Live in a mansion in the city", optionB: "Live in a cabin in the woods" },
+            { optionA: "Always be 10 minutes late", optionB: "Always be 20 minutes early" },
+            { optionA: "Have unlimited money", optionB: "Have unlimited time" },
+            { optionA: "Never use social media again", optionB: "Never watch another movie or TV show" }
+        ];
+        
+        const fallback = fallbackQuestions[Math.floor(Math.random() * fallbackQuestions.length)];
+        console.log('Using fallback question due to AI error');
+        return fallback;
+    }
+}
 
 async function startGame(client, roomId, room) {
     try {
@@ -22,7 +115,7 @@ async function startGame(client, roomId, room) {
         const embed = new EmbedBuilder()
             .setColor('#9b59b6')
             .setTitle('🤔 Would You Rather - Starting!')
-            .setDescription('Get ready! The game will begin in 3 seconds...');
+            .setDescription('Get ready! The game will begin in 3 seconds...\n*AI is generating unique questions for this game!*');
 
         await channel.send({ embeds: [embed] });
         await new Promise(resolve => setTimeout(resolve, 3000));
@@ -37,14 +130,13 @@ async function startGame(client, roomId, room) {
 async function playGame(client, roomId, room) {
     try {
         const channel = await client.channels.fetch(room.channelId);
-        const wyrData = await github.getWYRQuestions();
-        const questions = wyrData.questions;
         
         let survivors = [...room.players];
         let round = 1;
 
         while (survivors.length > 1) {
-            const question = questions[Math.floor(Math.random() * questions.length)];
+            // Generate a fresh AI question for each round
+            const question = await generateWYRQuestion();
 
             const embed = new EmbedBuilder()
                 .setColor('#9b59b6')
