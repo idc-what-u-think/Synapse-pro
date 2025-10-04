@@ -126,6 +126,50 @@ async function checkReminders() {
     }
 }
 
+async function initializeGameData() {
+    try {
+        console.log('Checking game data initialization...');
+        
+        // Initialize rewards if empty
+        let rewards = await github.getGameRewards();
+        if (!rewards || Object.keys(rewards).length === 0) {
+            console.log('Initializing default game rewards...');
+            rewards = {
+                typing_race_round: { coins: 50, bucks: 0 },
+                wyr_winner: { coins: 300, bucks: 2 },
+                reaction_winner: { coins: 100, bucks: 1 }
+            };
+            await github.saveGameRewards(rewards);
+            console.log('✅ Game rewards initialized');
+        } else {
+            console.log('✅ Game rewards already exist');
+        }
+        
+        // Initialize WYR questions if empty
+        let wyr = await github.getWYRQuestions();
+        if (!wyr || !wyr.questions || wyr.questions.length === 0) {
+            console.log('Initializing default WYR questions...');
+            wyr = {
+                questions: [
+                    { optionA: "Have the ability to fly", optionB: "Have the ability to turn invisible" },
+                    { optionA: "Live in a mansion in the city", optionB: "Live in a cabin in the woods" },
+                    { optionA: "Always be 10 minutes late", optionB: "Always be 20 minutes early" },
+                    { optionA: "Have unlimited money", optionB: "Have unlimited time" },
+                    { optionA: "Never use social media again", optionB: "Never watch another movie or TV show" }
+                ]
+            };
+            await github.saveWYRQuestions(wyr);
+            console.log('✅ WYR questions initialized');
+        } else {
+            console.log('✅ WYR questions already exist');
+        }
+        
+        console.log('✅ Game data initialization complete!');
+    } catch (error) {
+        console.error('Error initializing game data:', error);
+    }
+}
+
 async function initialize() {
     try {
         if (!ALLOWED_SERVER_ID) {
@@ -440,6 +484,7 @@ client.once('ready', async () => {
     console.log(`✅ Bot restricted to server ID: ${ALLOWED_SERVER_ID}`);
     
     await registerCommands();
+    await initializeGameData();
     
     client.user.setActivity('slash commands', { type: 'LISTENING' });
     
