@@ -42,6 +42,9 @@ const URL_PATTERNS = [
 const XP_COOLDOWN = 5 * 1000;
 const xpCooldowns = new Map();
 
+// User mode storage
+const userModes = new Map();
+
 function containsLink(message) {
     return URL_PATTERNS.some(pattern => pattern.test(message));
 }
@@ -130,6 +133,46 @@ async function addToUserHistory(userId, role, content) {
     } catch (error) {
         console.error(`Error adding to user history for ${userId}:`, error);
         return [];
+    }
+}
+
+function getUserMode(userId) {
+    return userModes.get(userId) || 'normal';
+}
+
+function setUserMode(userId, mode) {
+    userModes.set(userId, mode);
+    console.log(`User ${userId} mode set to: ${mode}`);
+}
+
+function parseMessageMode(content) {
+    // Check for mode prefixes
+    if (content.startsWith('pm-')) {
+        return { mode: 'pidgin', message: content.substring(3).trim() };
+    } else if (content.startsWith('rm-')) {
+        return { mode: 'research', message: content.substring(3).trim() };
+    } else if (content.startsWith('ins-')) {
+        return { mode: 'insult', message: content.substring(4).trim() };
+    } else if (content.startsWith('normal-')) {
+        return { mode: 'normal', message: content.substring(7).trim() };
+    }
+    
+    return { mode: null, message: content };
+}
+
+function getSystemPrompt(mode) {
+    switch (mode) {
+        case 'pidgin':
+            return "You are a casual, friendly chatbot that speaks ONLY in Nigerian Pidgin English. Use pidgin slang, expressions, and grammar naturally. Examples: 'wetin dey happen?', 'e dey kampe', 'no wahala', 'omo see as e be', 'abeg', 'sabi', etc. Keep responses short and conversational like chatting with a naija friend on Discord.";
+        
+        case 'research':
+            return "You are a knowledgeable researcher. Provide accurate, well-researched answers with proper information. Be concise but informative. Cite facts when relevant. Maintain a professional but approachable tone. Keep responses short but ensure they are properly researched and factual.";
+        
+        case 'insult':
+            return "You are a playful roasting chatbot. Insult the user in a humorous, over-the-top way using phrases like 'SYBAU 💀', 'STFU 🤡', 'you dey craze? 😂', 'mumu', 'ode', 'were', 'your head no correct 🤦', 'gerrout! 🚮'. Be funny and savage but keep it light-hearted. Don't be genuinely mean or cross lines.";
+        
+        default:
+            return "You are a casual, friendly chatbot. Keep responses short and conversational. Be helpful but concise. Use internet slang and abbreviations naturally. Be funny and relatable. Don't give long explanations unless asked. Respond like chatting with a friend on Discord. Know common abbreviations (lol, brb, imo, etc.) and be engaging.";
     }
 }
 
@@ -223,9 +266,9 @@ async function handleAIMessage(message, config) {
 
         message.channel.sendTyping();
 
-        let prompt = message.content.replace(botMention, '').trim();
+        let rawContent = message.content.replace(botMention, '').trim();
         
-        if (!prompt) {
+        if (!rawContent) {
             console.log('Empty prompt after cleaning, sending greeting');
             const embed = new EmbedBuilder()
                 .setColor(0x4285F4)
@@ -234,7 +277,36 @@ async function handleAIMessage(message, config) {
             return message.reply({ embeds: [embed] });
         }
 
-        console.log(`Processing prompt: "${prompt.substring(0, 100)}${prompt.length > 100 ? '...' : ''}"`);
+        // Parse message for mode prefixes
+        const { mode: newMode, message: prompt } = parseMessageMode(rawContent);
+        
+        // Get current user mode
+        let currentMode = getUserMode(userId);
+        
+        // Handle mode switching
+        if (newMode === 'normal') {
+            // User wants to return to normal mode
+            setUserMode(userId, 'normal');
+            currentMode = 'normal';
+            console.log(`User ${userId} switched to normal mode`);
+        } else if (newMode === 'pidgin') {
+            // User enters pidgin mode (persistent)
+            setUserMode(userId, 'pidgin');
+            currentMode = 'pidgin';
+            console.log(`User ${userId} entered pidgin mode`);
+        } else if (newMode === 'research') {
+            // Research mode is one-time only
+            currentMode = 'research';
+            console.log(`User ${userId} using research mode for this message`);
+        } else if (newMode === 'insult') {
+            // User enters insult mode (persistent)
+            setUserMode(userId, 'insult');
+            currentMode = 'insult';
+            console.log(`User ${userId} entered insult mode`);
+        }
+        // If no prefix, use current persistent mode
+
+        console.log(`Processing prompt in ${currentMode} mode: "${prompt.substring(0, 100)}${prompt.length > 100 ? '...' : ''}"`);
 
         if (GEMINI_KEYS.length === 0) {
             throw new Error('No Gemini API keys configured');
@@ -246,8 +318,7 @@ async function handleAIMessage(message, config) {
         let result;
         const imageAttachment = message.attachments.find(att => att.contentType?.startsWith('image/'));
 
-        const systemPrompt = "You are a casual, friendly chatbot. Keep responses short and conversational. Be helpful but concise. Use internet slang and abbreviations naturally. Be funny and relatable. Don't give long explanations unless asked. Respond like chatting with a friend on Discord. Know common abbreviations (lol, brb, imo, etc.) and be engaging.";
-
+        const systemPrompt = getSystemPrompt(currentMode);
         const enhancedPrompt = `${systemPrompt}\n\nUser: ${prompt}`;
 
         if (imageAttachment) {
@@ -281,11 +352,21 @@ async function handleAIMessage(message, config) {
         await addToUserHistory(userId, 'user', prompt);
         await addToUserHistory(userId, 'model', responseText);
         
+        // Add mode indicator to response
+        let modeIndicator = '';
+        if (currentMode === 'pidgin') {
+            modeIndicator = '🇳🇬 ';
+        } else if (currentMode === 'research') {
+            modeIndicator = '📚 ';
+        } else if (currentMode === 'insult') {
+            modeIndicator = '🔥 ';
+        }
+        
         if (responseText.length > 1900) {
             console.log('Response too long, splitting message');
             const embed = new EmbedBuilder()
                 .setColor(0x4285F4)
-                .setDescription(responseText.substring(0, 1900) + '...')
+                .setDescription(modeIndicator + responseText.substring(0, 1900) + '...')
                 .setFooter({ text: 'Response truncated due to Discord limits' });
 
             await message.reply({ embeds: [embed] });
@@ -295,10 +376,10 @@ async function handleAIMessage(message, config) {
                 await message.channel.send(remaining.substring(0, 1900));
             }
         } else {
-            await message.reply(responseText);
+            await message.reply(modeIndicator + responseText);
         }
 
-        console.log(`Successfully processed AI message for ${message.author.tag}`);
+        console.log(`Successfully processed AI message for ${message.author.tag} in ${currentMode} mode`);
 
     } catch (error) {
         console.error('Detailed AI Message Error:', error);
