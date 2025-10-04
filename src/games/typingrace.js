@@ -127,13 +127,20 @@ async function playRounds(client, roomId, totalRounds) {
         }
 
         const channel = await client.channels.fetch(room.channelId);
-        const rewards = await github.getGameRewards();
+        let rewards = await github.getGameRewards();
         
         console.log('Game rewards loaded:', rewards);
         
+        // Initialize rewards if empty or invalid
         if (!rewards || !rewards.typing_race_round) {
-            console.error('Invalid rewards structure:', rewards);
-            return;
+            console.log('Initializing default game rewards...');
+            rewards = {
+                typing_race_round: { coins: 50, bucks: 0 },
+                wyr_winner: { coins: 300, bucks: 2 },
+                reaction_winner: { coins: 100, bucks: 1 }
+            };
+            await github.saveGameRewards(rewards);
+            console.log('Default rewards saved:', rewards);
         }
 
         for (let round = 1; round <= totalRounds; round++) {
@@ -154,7 +161,21 @@ async function playRounds(client, roomId, totalRounds) {
 
             await channel.send({ embeds: [embed] });
 
-            const filter = m => room.players.includes(m.author.id) && m.content.toLowerCase() === phrase.toLowerCase();
+            // Store the phrase for comparison
+            const normalizedPhrase = phrase.toLowerCase().trim();
+            console.log(`Waiting for phrase: "${normalizedPhrase}"`);
+
+            const filter = m => {
+                const userMessage = m.content.toLowerCase().trim();
+                const isPlayer = room.players.includes(m.author.id);
+                const isMatch = userMessage === normalizedPhrase;
+                
+                console.log(`Message from ${m.author.tag}: "${userMessage}"`);
+                console.log(`Is player: ${isPlayer}, Is match: ${isMatch}`);
+                
+                return isPlayer && isMatch;
+            };
+            
             const collector = channel.createMessageCollector({ filter, time: 120000, max: 1 });
 
             const roundResult = await new Promise(resolve => {
@@ -165,6 +186,8 @@ async function playRounds(client, roomId, totalRounds) {
                     resolved = true;
 
                     try {
+                        console.log(`Winner detected: ${message.author.tag}`);
+                        
                         const economy = await github.getEconomy();
                         const userId = message.author.id;
 
@@ -172,8 +195,11 @@ async function playRounds(client, roomId, totalRounds) {
                             economy[userId] = { coins: 0, bucks: 0 };
                         }
 
-                        economy[userId].coins += rewards.typing_race_round.coins;
+                        const rewardCoins = rewards.typing_race_round?.coins || 50;
+                        economy[userId].coins += rewardCoins;
+                        
                         await github.saveEconomy(economy);
+                        console.log(`Awarded ${rewardCoins} coins to ${message.author.tag}`);
 
                         const winEmbed = new EmbedBuilder()
                             .setColor('#00ff00')
@@ -181,7 +207,7 @@ async function playRounds(client, roomId, totalRounds) {
                             .setDescription(`${message.author} won Round ${round}!`)
                             .addFields({
                                 name: 'Reward',
-                                value: `🪙 ${rewards.typing_race_round.coins} Coins`
+                                value: `🪙 ${rewardCoins} Coins`
                             });
 
                         await channel.send({ embeds: [winEmbed] });
