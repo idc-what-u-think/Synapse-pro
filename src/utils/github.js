@@ -18,7 +18,9 @@ const FILE_PATHS = {
     daily_cooldowns: 'data/economy/daily_cooldowns.json',
     active_rooms: 'data/games/active_rooms.json',
     game_rewards: 'data/games/rewards.json',
-    wyr_questions: 'data/games/wyr_questions.json'
+    wyr_questions: 'data/games/wyr_questions.json',
+    referral_links: 'data/referrals/links.json',
+    referral_tracking: 'data/referrals/tracking.json'
 };
 
 async function initializeRepo(octokit, owner, repo) {
