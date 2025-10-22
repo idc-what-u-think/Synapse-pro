@@ -18,6 +18,7 @@ const client = new Client({
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.GuildMembers,
         GatewayIntentBits.GuildPresences,
+        GatewayIntentBits.GuildInvites,
         GatewayIntentBits.MessageContent
     ]
 });
@@ -130,7 +131,6 @@ async function initializeGameData() {
     try {
         console.log('Checking game data initialization...');
         
-        // Initialize rewards if empty
         let rewards = await github.getGameRewards();
         if (!rewards || Object.keys(rewards).length === 0) {
             console.log('Initializing default game rewards...');
@@ -145,7 +145,6 @@ async function initializeGameData() {
             console.log('✅ Game rewards already exist');
         }
         
-        // Initialize WYR questions if empty
         let wyr = await github.getWYRQuestions();
         if (!wyr || !wyr.questions || wyr.questions.length === 0) {
             console.log('Initializing default WYR questions...');
@@ -167,6 +166,34 @@ async function initializeGameData() {
         console.log('✅ Game data initialization complete!');
     } catch (error) {
         console.error('Error initializing game data:', error);
+    }
+}
+
+async function cacheServerInvites() {
+    try {
+        console.log('Caching server invites...');
+        client.inviteCache = new Map();
+        
+        for (const guild of client.guilds.cache.values()) {
+            try {
+                const invites = await guild.invites.fetch();
+                const inviteMap = new Map();
+                invites.forEach(invite => {
+                    inviteMap.set(invite.code, { 
+                        uses: invite.uses, 
+                        inviterId: invite.inviter?.id 
+                    });
+                });
+                client.inviteCache.set(guild.id, inviteMap);
+                console.log(`✅ Cached ${invites.size} invites for ${guild.name}`);
+            } catch (error) {
+                console.error(`Could not cache invites for ${guild.name}:`, error.message);
+            }
+        }
+        
+        console.log('✅ Invite cache initialized');
+    } catch (error) {
+        console.error('Error caching invites:', error);
     }
 }
 
@@ -485,6 +512,7 @@ client.once('ready', async () => {
     
     await registerCommands();
     await initializeGameData();
+    await cacheServerInvites();
     
     client.user.setActivity('slash commands', { type: 'LISTENING' });
     
@@ -493,6 +521,36 @@ client.once('ready', async () => {
     
     setInterval(() => checkReminders(), 60000);
     console.log('Reminder checker started (every 60 seconds)');
+});
+
+client.on('inviteCreate', async (invite) => {
+    try {
+        if (!client.inviteCache) {
+            client.inviteCache = new Map();
+        }
+        
+        const guildInvites = client.inviteCache.get(invite.guild.id) || new Map();
+        guildInvites.set(invite.code, { 
+            uses: invite.uses, 
+            inviterId: invite.inviter?.id 
+        });
+        client.inviteCache.set(invite.guild.id, guildInvites);
+    } catch (error) {
+        console.error('Error updating invite cache on create:', error);
+    }
+});
+
+client.on('inviteDelete', async (invite) => {
+    try {
+        if (!client.inviteCache) return;
+        
+        const guildInvites = client.inviteCache.get(invite.guild.id);
+        if (guildInvites) {
+            guildInvites.delete(invite.code);
+        }
+    } catch (error) {
+        console.error('Error updating invite cache on delete:', error);
+    }
 });
 
 client.on('error', error => {
