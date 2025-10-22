@@ -23,11 +23,11 @@ module.exports = {
                 .setDescription('Enable referral system (Admin only)')
                 .addStringOption(option =>
                     option.setName('from')
-                        .setDescription('Start time (e.g., 12AM, 1PM, 11PM)')
+                        .setDescription('Start time (e.g., 12AM, 1PM, 9:30AM, 11:45PM)')
                         .setRequired(true))
                 .addStringOption(option =>
                     option.setName('to')
-                        .setDescription('End time (e.g., 12AM, 1PM, 11PM)')
+                        .setDescription('End time (e.g., 12AM, 1PM, 9:30AM, 11:45PM)')
                         .setRequired(true)))
         .addSubcommand(subcommand =>
             subcommand
@@ -220,7 +220,7 @@ async function handleToggle(interaction, enable) {
 
             if (!isValidTime(from) || !isValidTime(to)) {
                 return await interaction.editReply({
-                    content: '❌ Invalid time format. Use format like: 12AM, 1PM, 11PM'
+                    content: '❌ Invalid time format. Use format like: 12AM, 1PM, 9:30AM, 11:45PM'
                 });
             }
 
@@ -268,7 +268,34 @@ async function handleToggle(interaction, enable) {
 }
 
 function isValidTime(time) {
-    return /^(1[0-2]|[1-9])(AM|PM)$/i.test(time);
+    return /^(1[0-2]|[1-9])(:[0-5][0-9])?(AM|PM)$/i.test(time);
+}
+
+function convertTo24Hour(time) {
+    const match = time.match(/(\d+)(?::(\d+))?(AM|PM)/i);
+    if (!match) return 0;
+    
+    let hour = parseInt(match[1]);
+    const minutes = match[2] ? parseInt(match[2]) : 0;
+    const period = match[3].toUpperCase();
+    
+    if (period === 'PM' && hour !== 12) {
+        hour += 12;
+    } else if (period === 'AM' && hour === 12) {
+        hour = 0;
+    }
+    
+    return hour + (minutes / 60);
+}
+
+function isTimeInRange(current, from, to) {
+    const currentDecimal = current + (new Date().getMinutes() / 60);
+    
+    if (from <= to) {
+        return currentDecimal >= from && currentDecimal < to;
+    } else {
+        return currentDecimal >= from || currentDecimal < to;
+    }
 }
 
 async function cacheGuildInvites(client, guild) {
