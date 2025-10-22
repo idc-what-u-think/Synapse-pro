@@ -99,6 +99,18 @@ async function handleGetLink(interaction) {
 
             referrals[userId].inviteCode = invite.code;
             await github.saveData('data/referrals/links.json', referrals, 'Update referral links');
+            
+            if (!interaction.client.inviteCache) {
+                interaction.client.inviteCache = new Map();
+            }
+            const guildInvites = interaction.client.inviteCache.get(guild.id) || new Map();
+            guildInvites.set(invite.code, { 
+                uses: invite.uses || 0, 
+                inviterId: userId 
+            });
+            interaction.client.inviteCache.set(guild.id, guildInvites);
+            
+            console.log(`✅ Created and cached new referral invite ${invite.code} for ${interaction.user.tag}`);
         }
 
         const embed = new EmbedBuilder()
@@ -165,6 +177,7 @@ async function handleLeaderboard(interaction) {
 
         const sorted = Object.entries(referrals)
             .map(([userId, data]) => ({ userId, count: data.referralCount || 0 }))
+            .filter(entry => entry.count > 0)
             .sort((a, b) => b.count - a.count)
             .slice(0, 10);
 
@@ -289,7 +302,8 @@ function convertTo24Hour(time) {
 }
 
 function isTimeInRange(current, from, to) {
-    const currentDecimal = current + (new Date().getMinutes() / 60);
+    const now = new Date();
+    const currentDecimal = current + (now.getMinutes() / 60);
     
     if (from <= to) {
         return currentDecimal >= from && currentDecimal < to;
@@ -309,6 +323,7 @@ async function cacheGuildInvites(client, guild) {
             inviteMap.set(invite.code, { uses: invite.uses, inviterId: invite.inviter?.id });
         });
         client.inviteCache.set(guild.id, inviteMap);
+        console.log(`💾 Cached ${inviteMap.size} invites for ${guild.name}`);
     } catch (error) {
         console.error('Error caching invites:', error);
     }
