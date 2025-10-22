@@ -58,16 +58,21 @@ async function trackReferral(member, client) {
         }
 
         const now = new Date();
-        const currentHour = now.getHours();
-        const currentMinute = now.getMinutes();
+        const utcHour = now.getUTCHours();
+        const utcMinute = now.getUTCMinutes();
+        
+        const localHour = (utcHour + 1) % 24;
+        const localMinute = utcMinute;
+        
         const fromHour = convertTo24Hour(referralConfig.from);
         const toHour = convertTo24Hour(referralConfig.to);
 
-        console.log(`⏰ Current time: ${currentHour}:${currentMinute} (${currentHour + (currentMinute / 60)})`);
+        console.log(`⏰ UTC time: ${utcHour}:${utcMinute}`);
+        console.log(`⏰ Local time (GMT+1): ${localHour}:${localMinute} (${localHour + (localMinute / 60)})`);
         console.log(`⏰ From: ${referralConfig.from} (${fromHour})`);
         console.log(`⏰ To: ${referralConfig.to} (${toHour})`);
 
-        const isActive = isTimeInRange(currentHour, fromHour, toHour);
+        const isActive = isTimeInRange(localHour, fromHour, toHour);
         console.log(`✅ Time active: ${isActive}`);
 
         if (!isActive) {
@@ -181,7 +186,7 @@ function convertTo24Hour(time) {
 
 function isTimeInRange(current, from, to) {
     const now = new Date();
-    const currentDecimal = current + (now.getMinutes() / 60);
+    const currentDecimal = current + (now.getUTCMinutes() / 60);
     
     if (from <= to) {
         return currentDecimal >= from && currentDecimal < to;
