@@ -217,11 +217,6 @@ async function handleRiddle(message, config) {
         console.log(`AI Channel ID:`, guildConfig.aiChannel);
         console.log(`Current Channel ID:`, channelId);
         
-        // Only work in AI channel
-        if (!guildConfig.aiChannel || channelId !== guildConfig.aiChannel) {
-            return false;
-        }
-
         // Check if message starts with "Answer:"
         const content = message.content.trim();
         const answerPrefix = /^Answer:\s*/i;
@@ -231,6 +226,12 @@ async function handleRiddle(message, config) {
         }
 
         console.log(`Riddle answer attempt from ${message.author.tag}`);
+        
+        // Only work in AI channel if one is set
+        if (guildConfig.aiChannel && channelId !== guildConfig.aiChannel) {
+            console.log('Answer attempt not in AI channel, ignoring');
+            return false;
+        }
 
         // Get riddle data
         let riddleData;
