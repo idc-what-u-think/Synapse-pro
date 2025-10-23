@@ -209,13 +209,9 @@ module.exports = {
 
 async function handleRiddle(message, config) {
     try {
-        console.log('=== RIDDLE HANDLER CALLED ===');
         const guildId = message.guild.id;
         const channelId = message.channel.id;
         const guildConfig = config.guilds?.[guildId] || {};
-        console.log(`Guild config:`, guildConfig);
-        console.log(`AI Channel ID:`, guildConfig.aiChannel);
-        console.log(`Current Channel ID:`, channelId);
         
         // Check if message starts with "Answer:"
         const content = message.content.trim();
@@ -224,12 +220,9 @@ async function handleRiddle(message, config) {
         if (!answerPrefix.test(content)) {
             return false;
         }
-
-        console.log(`Riddle answer attempt from ${message.author.tag}`);
         
         // Only work in AI channel if one is set
         if (guildConfig.aiChannel && channelId !== guildConfig.aiChannel) {
-            console.log('Answer attempt not in AI channel, ignoring');
             return false;
         }
 
@@ -238,12 +231,10 @@ async function handleRiddle(message, config) {
         try {
             riddleData = await getData('data/riddle.json');
         } catch (error) {
-            console.log('No riddle data found, riddle not active');
-            return true; // Consume the message but do nothing
+            return true;
         }
 
         if (!riddleData.guilds || !riddleData.guilds[guildId]) {
-            console.log('No riddle data for this guild');
             return true;
         }
 
@@ -251,7 +242,6 @@ async function handleRiddle(message, config) {
 
         // If riddle is not active, ignore
         if (!guildRiddle.active) {
-            console.log('Riddle not active, ignoring answer attempt');
             return true;
         }
 
@@ -260,32 +250,20 @@ async function handleRiddle(message, config) {
         
         // The riddle answer - hardcoded
         const correctAnswer = 'e';
-        
-        console.log(`User answer: "${userAnswer}"`);
 
         // Check if correct
         if (userAnswer === correctAnswer || userAnswer === 'the letter e' || userAnswer === 'letter e') {
-            console.log('✅ CORRECT ANSWER!');
-            
-            // React with check mark
             await message.react('✅');
             
-            // Update riddle data
             guildRiddle.active = false;
             guildRiddle.solvedBy = message.author.id;
             guildRiddle.solvedAt = new Date().toISOString();
             
             await saveData('data/riddle.json', riddleData, `Riddle solved by ${message.author.tag}`);
-            
-            console.log(`Riddle solved by ${message.author.tag}, riddle deactivated`);
         } else {
-            console.log('❌ Wrong answer');
-            
-            // React with X
             await message.react('❌');
         }
 
-        // Return true to prevent normal AI processing
         return true;
 
     } catch (error) {
