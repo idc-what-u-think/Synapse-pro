@@ -209,9 +209,13 @@ module.exports = {
 
 async function handleRiddle(message, config) {
     try {
+        console.log('=== RIDDLE HANDLER CALLED ===');
         const guildId = message.guild.id;
         const channelId = message.channel.id;
         const guildConfig = config.guilds?.[guildId] || {};
+        console.log(`Guild config:`, guildConfig);
+        console.log(`AI Channel ID:`, guildConfig.aiChannel);
+        console.log(`Current Channel ID:`, channelId);
         
         // Only work in AI channel
         if (!guildConfig.aiChannel || channelId !== guildConfig.aiChannel) {
