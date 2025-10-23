@@ -23,7 +23,7 @@ module.exports = {
         try {
             await interaction.deferReply({ ephemeral: true });
 
-            const subcommand = interaction.subcommand();
+            const subcommand = interaction.options.getSubcommand();
             const guildId = interaction.guild.id;
 
             let riddleData = await getRiddleData();
