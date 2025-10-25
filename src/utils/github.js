@@ -20,7 +20,8 @@ const FILE_PATHS = {
     game_rewards: 'data/games/rewards.json',
     wyr_questions: 'data/games/wyr_questions.json',
     referral_links: 'data/referrals/links.json',
-    referral_tracking: 'data/referrals/tracking.json'
+    referral_tracking: 'data/referrals/tracking.json',
+    setup_cooldowns: 'data/setup/cooldowns.json'
 };
 
 async function initializeRepo(octokit, owner, repo) {
@@ -288,6 +289,15 @@ async function saveWYRQuestions(questions, message = 'Update WYR questions') {
     return await saveData('wyr_questions', questions, message);
 }
 
+async function getSetupCooldowns() {
+    const data = await getData('setup_cooldowns');
+    return data || {};
+}
+
+async function saveSetupCooldowns(cooldowns, message = 'Update setup cooldowns') {
+    return await saveData('setup_cooldowns', cooldowns, message);
+}
+
 async function testPermissions() {
     try {
         const { data: tokenData } = await octokit.rest.users.getAuthenticated();
@@ -360,6 +370,9 @@ module.exports = {
     saveGameRewards,
     getWYRQuestions,
     saveWYRQuestions,
+    
+    getSetupCooldowns,
+    saveSetupCooldowns,
     
     FILE_PATHS
 };
