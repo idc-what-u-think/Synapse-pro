@@ -1,4 +1,4 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const github = require('../utils/github');
 
 const GAME_ROLES = {
@@ -14,19 +14,17 @@ const GAME_ROLES = {
 const DMP_ROLE_ID = '1373766139997589654';
 const COOLDOWN_DURATION = 30 * 24 * 60 * 60 * 1000;
 
-const userGameSelections = new Map();
-
 async function handleSetupButtons(interaction) {
-    if (!interaction.isButton()) return;
-
-    if (interaction.customId === 'claim_dmp_role') {
-        await handleDMPRoleClaim(interaction);
+    if (interaction.isButton()) {
+        if (interaction.customId === 'claim_dmp_role') {
+            await handleDMPRoleClaim(interaction);
+        }
     }
-    else if (interaction.customId.startsWith('game_')) {
-        await handleGameSelection(interaction);
-    }
-    else if (interaction.customId === 'submit_games') {
-        await handleGameSubmit(interaction);
+    
+    if (interaction.isModalSubmit()) {
+        if (interaction.customId === 'game_selection_modal') {
+            await handleGameModalSubmit(interaction);
+        }
     }
 }
 
@@ -59,7 +57,7 @@ async function handleDMPRoleClaim(interaction) {
             await member.roles.add(DMP_ROLE_ID);
         }
 
-        await showGameSelection(interaction, cooldowns[userId]?.roles || []);
+        await showGameSelectionModal(interaction);
 
     } catch (error) {
         console.error('Error handling DMP role claim:', error);
@@ -70,111 +68,61 @@ async function handleDMPRoleClaim(interaction) {
     }
 }
 
-async function showGameSelection(interaction, previousRoles = []) {
-    const embed = new EmbedBuilder()
-        .setColor('#667eea')
-        .setTitle('🎮 CHOOSE YOUR GAMES')
-        .setDescription('**Which Games Do You Play?**\n\n⚠️ Be truthful or get banned\n✨ You can pick more than 1 game\n📝 Games are optional - you can skip if you don\'t play any')
-        .addFields({
-            name: '✨ DMP EMPIRE',
-            value: 'Select your games below!',
-            inline: false
-        })
-        .setFooter({ text: 'Click the games you play, then submit!' })
-        .setTimestamp();
+async function showGameSelectionModal(interaction) {
+    const modal = new ModalBuilder()
+        .setCustomId('game_selection_modal')
+        .setTitle('🎮 Select Your Games');
 
-    const row1 = new ActionRowBuilder()
-        .addComponents(
-            new ButtonBuilder()
-                .setCustomId('game_efootball')
-                .setLabel('⚽ Efootball')
-                .setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder()
-                .setCustomId('game_freefire')
-                .setLabel('🔥 Free Fire')
-                .setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder()
-                .setCustomId('game_cod')
-                .setLabel('🎯 Call of Duty')
-                .setStyle(ButtonStyle.Secondary)
-        );
+    const gameInput = new TextInputBuilder()
+        .setCustomId('selected_games')
+        .setLabel('Which games do you play?')
+        .setStyle(TextInputStyle.Paragraph)
+        .setPlaceholder('Type the game names, one per line:\n\nEfootball\nFree Fire\nCall of Duty\nDelta Force\nRoblox\nPUBG\nFarlight84')
+        .setRequired(false)
+        .setMaxLength(500);
 
-    const row2 = new ActionRowBuilder()
-        .addComponents(
-            new ButtonBuilder()
-                .setCustomId('game_delta')
-                .setLabel('🚁 Delta Force')
-                .setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder()
-                .setCustomId('game_roblox')
-                .setLabel('🎮 Roblox')
-                .setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder()
-                .setCustomId('game_pubg')
-                .setLabel('🎖️ PUBG')
-                .setStyle(ButtonStyle.Secondary)
-        );
+    const row = new ActionRowBuilder().addComponents(gameInput);
+    modal.addComponents(row);
 
-    const row3 = new ActionRowBuilder()
-        .addComponents(
-            new ButtonBuilder()
-                .setCustomId('game_farlight')
-                .setLabel('🚀 Farlight84')
-                .setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder()
-                .setCustomId('submit_games')
-                .setLabel('✨ COMPLETE SETUP')
-                .setStyle(ButtonStyle.Success)
-        );
-
-    await interaction.update({
-        embeds: [embed],
-        components: [row1, row2, row3]
-    });
+    await interaction.showModal(modal);
 }
 
-async function handleGameSelection(interaction) {
-    const userId = interaction.user.id;
-    const gameKey = interaction.customId.replace('game_', '');
-    
-    if (!userGameSelections.has(userId)) {
-        userGameSelections.set(userId, new Set());
-    }
-
-    const selectedGames = userGameSelections.get(userId);
-
-    if (selectedGames.has(gameKey)) {
-        selectedGames.delete(gameKey);
-    } else {
-        selectedGames.add(gameKey);
-    }
-
-    const components = interaction.message.components.map(row => {
-        const newRow = new ActionRowBuilder();
-        row.components.forEach(button => {
-            const gameKey = button.customId?.replace('game_', '');
-            const isSelected = selectedGames.has(gameKey);
-            
-            const newButton = ButtonBuilder.from(button);
-            if (button.customId?.startsWith('game_')) {
-                newButton.setStyle(isSelected ? ButtonStyle.Primary : ButtonStyle.Secondary);
-            }
-            newRow.addComponents(newButton);
-        });
-        return newRow;
-    });
-
-    await interaction.update({ components });
-}
-
-async function handleGameSubmit(interaction) {
+async function handleGameModalSubmit(interaction) {
     const userId = interaction.user.id;
     const member = interaction.member;
-    const selectedGames = userGameSelections.get(userId) || new Set();
+    const selectedGamesText = interaction.fields.getTextInputValue('selected_games').toLowerCase();
 
     try {
+        await interaction.deferReply({ ephemeral: true });
+
         const cooldowns = await github.getSetupCooldowns();
-        const previousRoles = cooldowns[userId]?.roles || [];
+        
+        const gameMapping = {
+            'efootball': 'efootball',
+            'e-football': 'efootball',
+            'free fire': 'freefire',
+            'freefire': 'freefire',
+            'call of duty': 'cod',
+            'cod': 'cod',
+            'codm': 'cod',
+            'delta force': 'delta',
+            'delta': 'delta',
+            'roblox': 'roblox',
+            'pubg': 'pubg',
+            'farlight': 'farlight',
+            'farlight84': 'farlight',
+            'farlight 84': 'farlight'
+        };
+
+        const selectedGames = new Set();
+        const lines = selectedGamesText.split('\n').map(line => line.trim()).filter(line => line);
+
+        for (const line of lines) {
+            const normalizedGame = gameMapping[line.toLowerCase()];
+            if (normalizedGame) {
+                selectedGames.add(normalizedGame);
+            }
+        }
 
         const allGameRoleIds = Object.values(GAME_ROLES);
         const selectedRoleIds = Array.from(selectedGames).map(game => GAME_ROLES[game]);
@@ -197,12 +145,23 @@ async function handleGameSubmit(interaction) {
         };
         await github.saveSetupCooldowns(cooldowns, `Setup completed for ${userId}`);
 
-        userGameSelections.delete(userId);
+        const gameNames = Array.from(selectedGames).map(game => {
+            const names = {
+                'efootball': '⚽ Efootball',
+                'freefire': '🔥 Free Fire',
+                'cod': '🎯 Call of Duty',
+                'delta': '🚁 Delta Force',
+                'roblox': '🎮 Roblox',
+                'pubg': '🎖️ PUBG',
+                'farlight': '🚀 Farlight84'
+            };
+            return names[game];
+        });
 
         const embed = new EmbedBuilder()
             .setColor('#00ff00')
             .setTitle('✅ Setup Complete!')
-            .setDescription(`**Your roles have been assigned!**\n\n${selectedGames.size > 0 ? `🎮 Games Selected: **${selectedGames.size}**` : '📝 No games selected'}`)
+            .setDescription(`**Your roles have been assigned!**\n\n${selectedGames.size > 0 ? `🎮 **Games Selected:**\n${gameNames.join('\n')}` : '📝 No games selected'}`)
             .addFields({
                 name: '📅 Next Setup Available',
                 value: 'You can update your roles again in 30 days',
@@ -211,16 +170,14 @@ async function handleGameSubmit(interaction) {
             .setFooter({ text: 'Enjoy your time in DMP Empire! 🎉' })
             .setTimestamp();
 
-        await interaction.update({
-            embeds: [embed],
-            components: []
+        await interaction.editReply({
+            embeds: [embed]
         });
 
     } catch (error) {
         console.error('Error submitting game selection:', error);
-        await interaction.reply({
-            content: '❌ An error occurred while assigning roles.',
-            ephemeral: true
+        await interaction.editReply({
+            content: '❌ An error occurred while assigning roles.'
         });
     }
 }
