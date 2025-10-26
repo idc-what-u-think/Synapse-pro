@@ -22,5 +22,9 @@ module.exports = {
         if (interaction.isButton()) {
             await handleSetupButtons(interaction);
         }
+
+        if (interaction.isModalSubmit()) {
+            await handleSetupButtons(interaction);
+        }
     },
 };
