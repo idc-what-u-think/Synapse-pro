@@ -1,4 +1,4 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } = require('discord.js');
 const github = require('../utils/github');
 
 const GAME_ROLES = {
@@ -21,9 +21,9 @@ async function handleSetupButtons(interaction) {
         }
     }
     
-    if (interaction.isModalSubmit()) {
-        if (interaction.customId === 'game_selection_modal') {
-            await handleGameModalSubmit(interaction);
+    if (interaction.isStringSelectMenu()) {
+        if (interaction.customId === 'game_selection_menu') {
+            await handleGameSelection(interaction);
         }
     }
 }
@@ -57,7 +57,7 @@ async function handleDMPRoleClaim(interaction) {
             await member.roles.add(DMP_ROLE_ID);
         }
 
-        await showGameSelectionModal(interaction);
+        await showGameSelectionMenu(interaction);
 
     } catch (error) {
         console.error('Error handling DMP role claim:', error);
@@ -68,64 +68,83 @@ async function handleDMPRoleClaim(interaction) {
     }
 }
 
-async function showGameSelectionModal(interaction) {
-    const modal = new ModalBuilder()
-        .setCustomId('game_selection_modal')
-        .setTitle('🎮 Select Your Games');
+async function showGameSelectionMenu(interaction) {
+    const embed = new EmbedBuilder()
+        .setColor('#667eea')
+        .setTitle('🎮 CHOOSE YOUR GAMES')
+        .setDescription('**Which Games Do You Play?**\n\n⚠️ Be truthful or get banned\n✨ You can select multiple games\n📝 Games are optional - you can skip')
+        .addFields({
+            name: '✨ DMP EMPIRE',
+            value: 'Select your games from the dropdown menu below!',
+            inline: false
+        })
+        .setFooter({ text: 'Select games and click Submit!' })
+        .setTimestamp();
 
-    const gameInput = new TextInputBuilder()
-        .setCustomId('selected_games')
-        .setLabel('Which games do you play?')
-        .setStyle(TextInputStyle.Paragraph)
-        .setPlaceholder('Type the game names, one per line:\n\nEfootball\nFree Fire\nCall of Duty\nDelta Force\nRoblox\nPUBG\nFarlight84')
-        .setRequired(false)
-        .setMaxLength(500);
+    const selectMenu = new StringSelectMenuBuilder()
+        .setCustomId('game_selection_menu')
+        .setPlaceholder('🎮 Select your games...')
+        .setMinValues(0)
+        .setMaxValues(7)
+        .addOptions(
+            new StringSelectMenuOptionBuilder()
+                .setLabel('⚽ Efootball')
+                .setDescription('Play Efootball')
+                .setValue('efootball')
+                .setEmoji('⚽'),
+            new StringSelectMenuOptionBuilder()
+                .setLabel('🔥 Free Fire')
+                .setDescription('Play Free Fire')
+                .setValue('freefire')
+                .setEmoji('🔥'),
+            new StringSelectMenuOptionBuilder()
+                .setLabel('🎯 Call of Duty')
+                .setDescription('Play Call of Duty')
+                .setValue('cod')
+                .setEmoji('🎯'),
+            new StringSelectMenuOptionBuilder()
+                .setLabel('🚁 Delta Force')
+                .setDescription('Play Delta Force')
+                .setValue('delta')
+                .setEmoji('🚁'),
+            new StringSelectMenuOptionBuilder()
+                .setLabel('🎮 Roblox')
+                .setDescription('Play Roblox')
+                .setValue('roblox')
+                .setEmoji('🎮'),
+            new StringSelectMenuOptionBuilder()
+                .setLabel('🎖️ PUBG')
+                .setDescription('Play PUBG')
+                .setValue('pubg')
+                .setEmoji('🎖️'),
+            new StringSelectMenuOptionBuilder()
+                .setLabel('🚀 Farlight84')
+                .setDescription('Play Farlight84')
+                .setValue('farlight')
+                .setEmoji('🚀')
+        );
 
-    const row = new ActionRowBuilder().addComponents(gameInput);
-    modal.addComponents(row);
+    const row1 = new ActionRowBuilder().addComponents(selectMenu);
 
-    await interaction.showModal(modal);
+    await interaction.reply({
+        embeds: [embed],
+        components: [row1],
+        ephemeral: true
+    });
 }
 
-async function handleGameModalSubmit(interaction) {
+async function handleGameSelection(interaction) {
     const userId = interaction.user.id;
     const member = interaction.member;
-    const selectedGamesText = interaction.fields.getTextInputValue('selected_games').toLowerCase();
+    const selectedGames = interaction.values;
 
     try {
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferUpdate();
 
         const cooldowns = await github.getSetupCooldowns();
         
-        const gameMapping = {
-            'efootball': 'efootball',
-            'e-football': 'efootball',
-            'free fire': 'freefire',
-            'freefire': 'freefire',
-            'call of duty': 'cod',
-            'cod': 'cod',
-            'codm': 'cod',
-            'delta force': 'delta',
-            'delta': 'delta',
-            'roblox': 'roblox',
-            'pubg': 'pubg',
-            'farlight': 'farlight',
-            'farlight84': 'farlight',
-            'farlight 84': 'farlight'
-        };
-
-        const selectedGames = new Set();
-        const lines = selectedGamesText.split('\n').map(line => line.trim()).filter(line => line);
-
-        for (const line of lines) {
-            const normalizedGame = gameMapping[line.toLowerCase()];
-            if (normalizedGame) {
-                selectedGames.add(normalizedGame);
-            }
-        }
-
         const allGameRoleIds = Object.values(GAME_ROLES);
-        const selectedRoleIds = Array.from(selectedGames).map(game => GAME_ROLES[game]);
+        const selectedRoleIds = selectedGames.map(game => GAME_ROLES[game]);
 
         for (const roleId of allGameRoleIds) {
             if (member.roles.cache.has(roleId)) {
@@ -145,7 +164,7 @@ async function handleGameModalSubmit(interaction) {
         };
         await github.saveSetupCooldowns(cooldowns, `Setup completed for ${userId}`);
 
-        const gameNames = Array.from(selectedGames).map(game => {
+        const gameNames = selectedGames.map(game => {
             const names = {
                 'efootball': '⚽ Efootball',
                 'freefire': '🔥 Free Fire',
@@ -161,7 +180,7 @@ async function handleGameModalSubmit(interaction) {
         const embed = new EmbedBuilder()
             .setColor('#00ff00')
             .setTitle('✅ Setup Complete!')
-            .setDescription(`**Your roles have been assigned!**\n\n${selectedGames.size > 0 ? `🎮 **Games Selected:**\n${gameNames.join('\n')}` : '📝 No games selected'}`)
+            .setDescription(`**Your roles have been assigned!**\n\n${selectedGames.length > 0 ? `🎮 **Games Selected:**\n${gameNames.join('\n')}` : '📝 No games selected'}`)
             .addFields({
                 name: '📅 Next Setup Available',
                 value: 'You can update your roles again in 30 days',
@@ -171,13 +190,15 @@ async function handleGameModalSubmit(interaction) {
             .setTimestamp();
 
         await interaction.editReply({
-            embeds: [embed]
+            embeds: [embed],
+            components: []
         });
 
     } catch (error) {
         console.error('Error submitting game selection:', error);
-        await interaction.editReply({
-            content: '❌ An error occurred while assigning roles.'
+        await interaction.followUp({
+            content: '❌ An error occurred while assigning roles.',
+            ephemeral: true
         });
     }
 }
