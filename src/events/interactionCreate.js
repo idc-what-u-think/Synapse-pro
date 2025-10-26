@@ -23,7 +23,7 @@ module.exports = {
             await handleSetupButtons(interaction);
         }
 
-        if (interaction.isModalSubmit()) {
+        if (interaction.isStringSelectMenu()) {
             await handleSetupButtons(interaction);
         }
     },
