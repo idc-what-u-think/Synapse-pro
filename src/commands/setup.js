@@ -16,14 +16,14 @@ module.exports = {
                 value: 'Click the button below to get started!',
                 inline: false
             })
-            .setFooter({ text: '1. Get the DMP ROLE (Required)' })
+            .setFooter({ text: '1. Get Your Role (Required)' })
             .setTimestamp();
 
         const row = new ActionRowBuilder()
             .addComponents(
                 new ButtonBuilder()
                     .setCustomId('claim_dmp_role')
-                    .setLabel('🎮 CLAIM DMP ROLE')
+                    .setLabel('🎮 GET ROLE')
                     .setStyle(ButtonStyle.Primary)
             );
 
