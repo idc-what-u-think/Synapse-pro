@@ -1,4 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const github = require('../utils/github');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -30,9 +31,9 @@ module.exports = {
                 .setDescription('[Free Fire Only] Your play style')
                 .addChoices(
                     { name: 'Balanced', value: 'balanced' },
-                    { name: 'Aggressive', value: 'aggressive' },
-                    { name: 'Precise', value: 'precise' },
-                    { name: 'Defensive', value: 'defensive' }
+                    { name: 'Aggressive (VIP)', value: 'aggressive' },
+                    { name: 'Precise (VIP)', value: 'precise' },
+                    { name: 'Defensive (VIP)', value: 'defensive' }
                 ))
         .addStringOption(option =>
             option.setName('experience')
@@ -50,6 +51,28 @@ module.exports = {
         const fingerCount = interaction.options.getString('finger_count');
         const playStyle = interaction.options.getString('play_style');
         const experience = interaction.options.getString('experience');
+        const userId = interaction.user.id;
+        const username = interaction.user.username;
+        const serverId = interaction.guild?.id || 'DM';
+
+        // Load user data
+        const sensiData = await github.getSensiUsers();
+        const userData = sensiData.users[userId];
+
+        if (!userData) {
+            return await interaction.reply({
+                content: '❌ You don\'t have an account! Use `/signup` first.',
+                ephemeral: true
+            });
+        }
+
+        // Check if banned
+        if (userData.isBanned) {
+            return await interaction.reply({
+                content: `🚫 **You are banned from using this bot.**\nReason: ${userData.banReason || 'Not specified'}`,
+                ephemeral: true
+            });
+        }
 
         // Validate game-specific requirements
         if (game === 'codm' && !fingerCount) {
@@ -66,10 +89,21 @@ module.exports = {
             });
         }
 
+        // Check VIP features
+        const isVipPlayStyle = ['aggressive', 'precise', 'defensive'].includes(playStyle);
+        const effectiveRole = userData.role; // Can add server VIP logic later
+
+        if (isVipPlayStyle && effectiveRole === 'free') {
+            return await interaction.reply({
+                content: '⚠️ **VIP Feature**\nThe selected play style requires VIP access. Using "Balanced" instead or upgrade to VIP!',
+                ephemeral: true
+            });
+        }
+
         await interaction.deferReply();
 
         try {
-            // Call your website API
+            // Call website API
             const apiUrl = 'https://gamingsensitivity.vercel.app';
             let result;
 
@@ -84,14 +118,15 @@ module.exports = {
                 });
                 result = await response.json();
             } else {
+                const calculatorType = effectiveRole === 'vip' ? 'vip' : 'free';
                 const response = await fetch(`${apiUrl}/api/generate/freefire`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         device_name: device,
-                        play_style: playStyle,
+                        play_style: playStyle || 'balanced',
                         experience_level: experience,
-                        calculator_type: 'free'
+                        calculator_type: calculatorType
                     })
                 });
                 result = await response.json();
@@ -102,22 +137,45 @@ module.exports = {
                 
                 if (result.suggestions && result.suggestions.length > 0) {
                     errorMsg += '**Did you mean:**\n';
-                    result.suggestions.forEach(s => {
-                        errorMsg += `• ${s}\n`;
-                    });
-                    errorMsg += '\n';
+                    result.suggestions.forEach(s => errorMsg += `• ${s}\n`);
                 }
                 
-                errorMsg += '📱 Visit https://gamingsensitivity.vercel.app to find the exact device name.';
-                
+                errorMsg += '\n📱 Visit https://gamingsensitivity.vercel.app to find the exact device name.';
                 return await interaction.editReply(errorMsg);
             }
 
+            // Update user stats
+            const today = new Date().toISOString().split('T')[0];
+            if (userData.lastGenerationDate !== today) {
+                userData.generationsToday = 0;
+            }
+            userData.generationsToday++;
+            userData.totalGenerations++;
+            userData.lastGenerationDate = today;
+            await github.saveSensiUsers(sensiData, `Generation by ${username}`);
+
+            // Log generation
+            const generationsData = await github.getSensiGenerations();
+            generationsData.logs.push({
+                id: Date.now().toString(),
+                userId: userId,
+                username: username,
+                serverId: serverId,
+                serverName: interaction.guild?.name || 'DM',
+                game: game,
+                deviceName: device,
+                calculatorType: result.calculator_type || 'free',
+                generatedAt: new Date().toISOString()
+            });
+            await github.saveSensiGenerations(generationsData, 'Log generation');
+
             // Format response
+            const roleEmoji = effectiveRole === 'vip' ? '⭐' : '🆓';
+
             if (game === 'codm') {
                 const mp = result.data.mp;
                 const embed = new EmbedBuilder()
-                    .setTitle('🎮 CODM Sensitivity Settings')
+                    .setTitle(`${roleEmoji} CODM Sensitivity Settings`)
                     .setColor(0x5865F2)
                     .setDescription(`**Device:** ${device}\n**Fingers:** ${fingerCount}`)
                     .addFields(
@@ -144,16 +202,13 @@ module.exports = {
             } else {
                 const data = result.data;
                 const embed = new EmbedBuilder()
-                    .setTitle('🎮 Free Fire Sensitivity Settings')
-                    .setColor(0xFF4500)
-                    .setDescription(`**Device:** ${device}\n**Play Style:** ${playStyle}\n**Experience:** ${experience}`)
-                    .addFields(
-                        {
-                            name: '🎯 Sensitivity Values',
-                            value: `General: **${data.general}**\nRed Dot: **${data.redDot}**\n2x Scope: **${data.scope2x}**\n4x Scope: **${data.scope4x}**\nSniper: **${data.sniperScope}**\nFree Look: **${data.freeLook}**`,
-                            inline: false
-                        }
-                    )
+                    .setTitle(`${roleEmoji} Free Fire Sensitivity Settings`)
+                    .setColor(effectiveRole === 'vip' ? 0xFFD700 : 0xFF4500)
+                    .setDescription(`**Device:** ${device}\n**Play Style:** ${playStyle}\n**Experience:** ${experience}\n**Calculator:** ${effectiveRole.toUpperCase()}`)
+                    .addFields({
+                        name: '🎯 Sensitivity Values',
+                        value: `General: **${data.general}**\nRed Dot: **${data.redDot}**\n2x Scope: **${data.scope2x}**\n4x Scope: **${data.scope4x}**\nSniper: **${data.sniperScope}**\nFree Look: **${data.freeLook}**`
+                    })
                     .setFooter({ text: 'gamingsensitivity.vercel.app' })
                     .setTimestamp();
 
@@ -164,12 +219,19 @@ module.exports = {
                     });
                 }
 
+                if (effectiveRole === 'free') {
+                    embed.addFields({
+                        name: '💎 Upgrade to VIP',
+                        value: 'Unlock advanced features, more play styles, and image exports!'
+                    });
+                }
+
                 await interaction.editReply({ embeds: [embed] });
             }
 
         } catch (error) {
             console.error('Generate error:', error);
-            await interaction.editReply('❌ An error occurred while generating sensitivity settings. Please try again later.');
+            await interaction.editReply('❌ An error occurred. Please try again later.');
         }
     }
 };
