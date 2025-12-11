@@ -21,7 +21,16 @@ const FILE_PATHS = {
     wyr_questions: 'data/games/wyr_questions.json',
     referral_links: 'data/referrals/links.json',
     referral_tracking: 'data/referrals/tracking.json',
-    setup_cooldowns: 'data/setup/cooldowns.json'
+    setup_cooldowns: 'data/setup/cooldowns.json',
+    
+    // NEW: Sensitivity Generator Data
+    sensi_users: 'data/sensitivity/users.json',
+    sensi_generations: 'data/sensitivity/generations.json',
+    sensi_servers: 'data/sensitivity/servers.json',
+    sensi_config: 'data/sensitivity/config.json',
+    sensi_api_keys: 'data/sensitivity/api_keys.json',
+    sensi_notifications: 'data/sensitivity/notifications.json',
+    sensi_broadcast_history: 'data/sensitivity/broadcast_history.json',
 };
 
 async function initializeRepo(octokit, owner, repo) {
@@ -155,6 +164,10 @@ async function saveData(pathOrKey, content, message = 'Update data', maxRetries 
         }
     }
 }
+
+// ============================================
+// EXISTING FUNCTIONS (kept as-is)
+// ============================================
 
 async function getConfig() {
     return await getData('config');
@@ -298,6 +311,405 @@ async function saveSetupCooldowns(cooldowns, message = 'Update setup cooldowns')
     return await saveData('setup_cooldowns', cooldowns, message);
 }
 
+// ============================================
+// NEW: SENSITIVITY GENERATOR FUNCTIONS
+// ============================================
+
+// Users Management
+async function getSensiUsers() {
+    const data = await getData('sensi_users');
+    return data || { users: {} };
+}
+
+async function saveSensiUsers(users, message = 'Update sensitivity users') {
+    return await saveData('sensi_users', users, message);
+}
+
+async function getSensiUser(userId) {
+    const data = await getSensiUsers();
+    return data.users[userId] || null;
+}
+
+async function updateSensiUser(userId, updates, message = 'Update user') {
+    const data = await getSensiUsers();
+    if (data.users[userId]) {
+        data.users[userId] = { ...data.users[userId], ...updates };
+        await saveSensiUsers(data, message);
+        return data.users[userId];
+    }
+    return null;
+}
+
+async function createSensiUser(userId, username) {
+    const data = await getSensiUsers();
+    data.users[userId] = {
+        userId: userId,
+        username: username,
+        role: 'free',
+        totalGenerations: 0,
+        generationsToday: 0,
+        lastGenerationDate: null,
+        createdAt: new Date().toISOString(),
+        lastLogin: new Date().toISOString(),
+        vipGrantedBy: null,
+        vipGrantedAt: null,
+        vipExpiresAt: null,
+        isBanned: false,
+        banReason: null,
+        bannedBy: null,
+        bannedAt: null
+    };
+    await saveSensiUsers(data, `Created user ${username}`);
+    return data.users[userId];
+}
+
+async function grantVIP(userId, duration, grantedBy) {
+    const data = await getSensiUsers();
+    if (!data.users[userId]) return null;
+    
+    let expiresAt = null;
+    if (duration !== 'permanent') {
+        const days = parseInt(duration);
+        expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+    }
+    
+    data.users[userId].role = 'vip';
+    data.users[userId].vipGrantedBy = grantedBy;
+    data.users[userId].vipGrantedAt = new Date().toISOString();
+    data.users[userId].vipExpiresAt = expiresAt;
+    
+    await saveSensiUsers(data, `Granted VIP to ${data.users[userId].username}`);
+    return data.users[userId];
+}
+
+async function revokeVIP(userId) {
+    const data = await getSensiUsers();
+    if (!data.users[userId]) return null;
+    
+    data.users[userId].role = 'free';
+    data.users[userId].vipGrantedBy = null;
+    data.users[userId].vipGrantedAt = null;
+    data.users[userId].vipExpiresAt = null;
+    
+    await saveSensiUsers(data, `Revoked VIP from ${data.users[userId].username}`);
+    return data.users[userId];
+}
+
+async function banUser(userId, reason, bannedBy) {
+    const data = await getSensiUsers();
+    if (!data.users[userId]) return null;
+    
+    data.users[userId].isBanned = true;
+    data.users[userId].banReason = reason;
+    data.users[userId].bannedBy = bannedBy;
+    data.users[userId].bannedAt = new Date().toISOString();
+    
+    await saveSensiUsers(data, `Banned user ${data.users[userId].username}`);
+    return data.users[userId];
+}
+
+async function unbanUser(userId) {
+    const data = await getSensiUsers();
+    if (!data.users[userId]) return null;
+    
+    data.users[userId].isBanned = false;
+    data.users[userId].banReason = null;
+    data.users[userId].bannedBy = null;
+    data.users[userId].bannedAt = null;
+    
+    await saveSensiUsers(data, `Unbanned user ${data.users[userId].username}`);
+    return data.users[userId];
+}
+
+// Generation Logs
+async function getSensiGenerations() {
+    const data = await getData('sensi_generations');
+    return data || { logs: [] };
+}
+
+async function saveSensiGenerations(generations, message = 'Update sensitivity generations') {
+    return await saveData('sensi_generations', generations, message);
+}
+
+async function addGenerationLog(logData) {
+    const data = await getSensiGenerations();
+    data.logs.push({
+        id: Date.now().toString(),
+        ...logData,
+        generatedAt: new Date().toISOString()
+    });
+    await saveSensiGenerations(data, 'Log generation');
+    return data.logs[data.logs.length - 1];
+}
+
+async function getGenerationsByUser(userId, limit = 50) {
+    const data = await getSensiGenerations();
+    return data.logs
+        .filter(log => log.userId === userId)
+        .slice(-limit)
+        .reverse();
+}
+
+async function getGenerationsByGame(game, limit = 100) {
+    const data = await getSensiGenerations();
+    return data.logs
+        .filter(log => log.game === game)
+        .slice(-limit)
+        .reverse();
+}
+
+async function getGenerationsToday() {
+    const data = await getSensiGenerations();
+    const today = new Date().toISOString().split('T')[0];
+    return data.logs.filter(log => log.generatedAt.startsWith(today));
+}
+
+// Server Management
+async function getSensiServers() {
+    const data = await getData('sensi_servers');
+    return data || { servers: {} };
+}
+
+async function saveSensiServers(servers, message = 'Update sensitivity servers') {
+    return await saveData('sensi_servers', servers, message);
+}
+
+async function updateServerInfo(serverId, serverName, memberCount) {
+    const data = await getSensiServers();
+    if (!data.servers[serverId]) {
+        data.servers[serverId] = {
+            serverId: serverId,
+            serverName: serverName,
+            memberCount: memberCount,
+            isVip: false,
+            isBlacklisted: false,
+            vipGrantedBy: null,
+            vipGrantedAt: null,
+            vipExpiresAt: null,
+            blacklistReason: null,
+            blacklistedBy: null,
+            blacklistedAt: null,
+            joinedAt: new Date().toISOString(),
+            totalGenerations: 0,
+            activeUsers: 0
+        };
+    } else {
+        data.servers[serverId].serverName = serverName;
+        data.servers[serverId].memberCount = memberCount;
+    }
+    await saveSensiServers(data, `Updated server ${serverName}`);
+    return data.servers[serverId];
+}
+
+async function grantServerVIP(serverId, duration, grantedBy) {
+    const data = await getSensiServers();
+    if (!data.servers[serverId]) return null;
+    
+    let expiresAt = null;
+    if (duration !== 'permanent') {
+        const days = parseInt(duration);
+        expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+    }
+    
+    data.servers[serverId].isVip = true;
+    data.servers[serverId].vipGrantedBy = grantedBy;
+    data.servers[serverId].vipGrantedAt = new Date().toISOString();
+    data.servers[serverId].vipExpiresAt = expiresAt;
+    
+    await saveSensiServers(data, `Granted VIP to server ${data.servers[serverId].serverName}`);
+    return data.servers[serverId];
+}
+
+async function revokeServerVIP(serverId) {
+    const data = await getSensiServers();
+    if (!data.servers[serverId]) return null;
+    
+    data.servers[serverId].isVip = false;
+    data.servers[serverId].vipGrantedBy = null;
+    data.servers[serverId].vipGrantedAt = null;
+    data.servers[serverId].vipExpiresAt = null;
+    
+    await saveSensiServers(data, `Revoked VIP from server ${data.servers[serverId].serverName}`);
+    return data.servers[serverId];
+}
+
+async function blacklistServer(serverId, reason, blacklistedBy) {
+    const data = await getSensiServers();
+    if (!data.servers[serverId]) return null;
+    
+    data.servers[serverId].isBlacklisted = true;
+    data.servers[serverId].blacklistReason = reason;
+    data.servers[serverId].blacklistedBy = blacklistedBy;
+    data.servers[serverId].blacklistedAt = new Date().toISOString();
+    
+    await saveSensiServers(data, `Blacklisted server ${data.servers[serverId].serverName}`);
+    return data.servers[serverId];
+}
+
+async function unblacklistServer(serverId) {
+    const data = await getSensiServers();
+    if (!data.servers[serverId]) return null;
+    
+    data.servers[serverId].isBlacklisted = false;
+    data.servers[serverId].blacklistReason = null;
+    data.servers[serverId].blacklistedBy = null;
+    data.servers[serverId].blacklistedAt = null;
+    
+    await saveSensiServers(data, `Unblacklisted server ${data.servers[serverId].serverName}`);
+    return data.servers[serverId];
+}
+
+// Bot Configuration
+async function getSensiConfig() {
+    const data = await getData('sensi_config');
+    return data || {
+        maintenanceMode: false,
+        botStatus: 'online',
+        features: {
+            allowSignups: true,
+            allowGenerations: true,
+            requireAccountForGeneration: true
+        },
+        notifications: {
+            newUserSignup: { enabled: true, webhookUrl: null, email: null },
+            vipGranted: { enabled: true, webhookUrl: null, email: null },
+            userBanned: { enabled: true, webhookUrl: null, email: null },
+            dailySummary: { enabled: true, webhookUrl: null, email: null },
+            generationMilestone: { enabled: true, webhookUrl: null, email: null }
+        }
+    };
+}
+
+async function saveSensiConfig(config, message = 'Update sensitivity config') {
+    return await saveData('sensi_config', config, message);
+}
+
+// API Keys
+async function getSensiApiKeys() {
+    const data = await getData('sensi_api_keys');
+    return data || { keys: [] };
+}
+
+async function saveSensiApiKeys(keys, message = 'Update API keys') {
+    return await saveData('sensi_api_keys', keys, message);
+}
+
+async function createApiKey(name, createdBy) {
+    const data = await getSensiApiKeys();
+    const keyValue = `sk_${crypto.randomUUID().replace(/-/g, '')}`;
+    
+    data.keys.push({
+        id: crypto.randomUUID(),
+        name: name,
+        keyValue: keyValue,
+        createdBy: createdBy,
+        createdAt: new Date().toISOString(),
+        lastUsed: null,
+        isActive: true,
+        rateLimit: 100,
+        requestsToday: 0,
+        totalRequests: 0
+    });
+    
+    await saveSensiApiKeys(data, `Created API key: ${name}`);
+    return data.keys[data.keys.length - 1];
+}
+
+async function deleteApiKey(keyId) {
+    const data = await getSensiApiKeys();
+    data.keys = data.keys.filter(k => k.id !== keyId);
+    await saveSensiApiKeys(data, `Deleted API key ${keyId}`);
+    return true;
+}
+
+// Broadcast History
+async function getSensiBroadcastHistory() {
+    const data = await getData('sensi_broadcast_history');
+    return data || { broadcasts: [] };
+}
+
+async function saveSensiBroadcastHistory(history, message = 'Update broadcast history') {
+    return await saveData('sensi_broadcast_history', history, message);
+}
+
+async function addBroadcast(broadcastData) {
+    const data = await getSensiBroadcastHistory();
+    data.broadcasts.push({
+        id: Date.now().toString(),
+        ...broadcastData,
+        sentAt: new Date().toISOString()
+    });
+    await saveSensiBroadcastHistory(data, 'Log broadcast');
+    return data.broadcasts[data.broadcasts.length - 1];
+}
+
+// Statistics & Analytics
+async function getSensiStats() {
+    const users = await getSensiUsers();
+    const generations = await getSensiGenerations();
+    const servers = await getSensiServers();
+    
+    const userList = Object.values(users.users);
+    const today = new Date().toISOString().split('T')[0];
+    
+    return {
+        totalUsers: userList.length,
+        vipUsers: userList.filter(u => u.role === 'vip').length,
+        freeUsers: userList.filter(u => u.role === 'free').length,
+        bannedUsers: userList.filter(u => u.isBanned).length,
+        totalServers: Object.keys(servers.servers || {}).length,
+        vipServers: Object.values(servers.servers || {}).filter(s => s.isVip).length,
+        blacklistedServers: Object.values(servers.servers || {}).filter(s => s.isBlacklisted).length,
+        generationsToday: generations.logs.filter(l => l.generatedAt.startsWith(today)).length,
+        generationsTotal: generations.logs.length,
+        popularDevices: getPopularDevices(generations.logs, 10),
+        gameStats: getGameStats(generations.logs),
+        dailyGenerations: getDailyGenerations(generations.logs, 7)
+    };
+}
+
+function getPopularDevices(logs, limit = 10) {
+    const deviceCounts = {};
+    logs.forEach(log => {
+        deviceCounts[log.deviceName] = (deviceCounts[log.deviceName] || 0) + 1;
+    });
+    return Object.entries(deviceCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, limit)
+        .map(([device, count]) => ({ device, count }));
+}
+
+function getGameStats(logs) {
+    const stats = { freefire: 0, codm: 0 };
+    logs.forEach(log => {
+        stats[log.game] = (stats[log.game] || 0) + 1;
+    });
+    return stats;
+}
+
+function getDailyGenerations(logs, days = 7) {
+    const daily = {};
+    const now = Date.now();
+    
+    for (let i = 0; i < days; i++) {
+        const date = new Date(now - i * 24 * 60 * 60 * 1000);
+        const dateStr = date.toISOString().split('T')[0];
+        daily[dateStr] = 0;
+    }
+    
+    logs.forEach(log => {
+        const date = log.generatedAt.split('T')[0];
+        if (daily.hasOwnProperty(date)) {
+            daily[date]++;
+        }
+    });
+    
+    return Object.entries(daily)
+        .map(([date, count]) => ({ date, count }))
+        .reverse();
+}
+
+// Test Permissions
 async function testPermissions() {
     try {
         const { data: tokenData } = await octokit.rest.users.getAuthenticated();
@@ -337,10 +749,12 @@ async function testPermissions() {
 }
 
 module.exports = {
+    // Core functions
     getData,
     saveData,
     testPermissions,
     
+    // Existing functions
     getConfig,
     saveConfig,
     getWarnings,
@@ -357,7 +771,6 @@ module.exports = {
     saveActiveGiveaways,
     getGiveawayHistory,
     saveGiveawayHistory,
-    
     getEconomy,
     saveEconomy,
     getInventory,
@@ -370,9 +783,55 @@ module.exports = {
     saveGameRewards,
     getWYRQuestions,
     saveWYRQuestions,
-    
     getSetupCooldowns,
     saveSetupCooldowns,
+    
+    // NEW: Sensitivity Generator Functions
+    // Users
+    getSensiUsers,
+    saveSensiUsers,
+    getSensiUser,
+    updateSensiUser,
+    createSensiUser,
+    grantVIP,
+    revokeVIP,
+    banUser,
+    unbanUser,
+    
+    // Generations
+    getSensiGenerations,
+    saveSensiGenerations,
+    addGenerationLog,
+    getGenerationsByUser,
+    getGenerationsByGame,
+    getGenerationsToday,
+    
+    // Servers
+    getSensiServers,
+    saveSensiServers,
+    updateServerInfo,
+    grantServerVIP,
+    revokeServerVIP,
+    blacklistServer,
+    unblacklistServer,
+    
+    // Config
+    getSensiConfig,
+    saveSensiConfig,
+    
+    // API Keys
+    getSensiApiKeys,
+    saveSensiApiKeys,
+    createApiKey,
+    deleteApiKey,
+    
+    // Broadcast
+    getSensiBroadcastHistory,
+    saveSensiBroadcastHistory,
+    addBroadcast,
+    
+    // Stats
+    getSensiStats,
     
     FILE_PATHS
 };
