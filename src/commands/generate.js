@@ -15,29 +15,29 @@ module.exports = {
                 ))
         .addStringOption(option =>
             option.setName('device')
-                .setDescription('Your device name (e.g., iPhone 14 Pro, Samsung Galaxy S23)')
+                .setDescription('Your device name (e.g., iPhone 14 Pro)')
                 .setRequired(true))
         .addStringOption(option =>
             option.setName('finger_count')
-                .setDescription('[CODM Only] Number of fingers you use')
+                .setDescription('[CODM Only] Number of fingers')
                 .addChoices(
-                    { name: '2 Fingers (Thumbs)', value: '2fingers' },
+                    { name: '2 Fingers', value: '2fingers' },
                     { name: '3 Fingers', value: '3fingers' },
                     { name: '4 Fingers', value: '4fingers' },
-                    { name: '4+ Fingers (Boss level)', value: '4+' }
+                    { name: '4+', value: '4+' }
                 ))
         .addStringOption(option =>
             option.setName('play_style')
-                .setDescription('[Free Fire Only] Your play style')
+                .setDescription('[Free Fire] Your play style')
                 .addChoices(
                     { name: 'Balanced', value: 'balanced' },
-                    { name: 'Aggressive (VIP)', value: 'aggressive' },
-                    { name: 'Precise (VIP)', value: 'precise' },
-                    { name: 'Defensive (VIP)', value: 'defensive' }
+                    { name: 'Aggressive', value: 'aggressive' },
+                    { name: 'Precise', value: 'precise' },
+                    { name: 'Defensive', value: 'defensive' }
                 ))
         .addStringOption(option =>
             option.setName('experience')
-                .setDescription('[Free Fire Only] Your experience level')
+                .setDescription('[Free Fire] Your experience')
                 .addChoices(
                     { name: 'Beginner', value: 'beginner' },
                     { name: 'Intermediate', value: 'intermediate' },
@@ -55,54 +55,46 @@ module.exports = {
         const username = interaction.user.username;
         const serverId = interaction.guild?.id || 'DM';
 
-        // Load user data
-        const sensiData = await github.getSensiUsers();
-        const userData = sensiData.users[userId];
-
-        if (!userData) {
-            return await interaction.reply({
-                content: '❌ You don\'t have an account! Use `/signup` first.',
-                ephemeral: true
-            });
-        }
-
-        // Check if banned
-        if (userData.isBanned) {
-            return await interaction.reply({
-                content: `🚫 **You are banned from using this bot.**\nReason: ${userData.banReason || 'Not specified'}`,
-                ephemeral: true
-            });
-        }
-
-        // Validate game-specific requirements
-        if (game === 'codm' && !fingerCount) {
-            return await interaction.reply({
-                content: '❌ **Error:** CODM requires finger count selection.',
-                ephemeral: true
-            });
-        }
-
-        if (game === 'freefire' && (!playStyle || !experience)) {
-            return await interaction.reply({
-                content: '❌ **Error:** Free Fire requires play style and experience level.',
-                ephemeral: true
-            });
-        }
-
-        // Check VIP features
-        const isVipPlayStyle = ['aggressive', 'precise', 'defensive'].includes(playStyle);
-        const effectiveRole = userData.role; // Can add server VIP logic later
-
-        if (isVipPlayStyle && effectiveRole === 'free') {
-            return await interaction.reply({
-                content: '⚠️ **VIP Feature**\nThe selected play style requires VIP access. Using "Balanced" instead or upgrade to VIP!',
-                ephemeral: true
-            });
-        }
-
+        // DEFER IMMEDIATELY - BEFORE ANY OTHER CODE
         await interaction.deferReply();
 
         try {
+            // Load user data
+            let sensiData = await github.getSensiUsers();
+            if (!sensiData || !sensiData.users) {
+                sensiData = { users: {} };
+            }
+            
+            const userData = sensiData.users[userId];
+
+            if (!userData) {
+                return await interaction.editReply({
+                    content: '❌ You don\'t have an account! Use `/signup` first.'
+                });
+            }
+
+            // Check if banned
+            if (userData.isBanned) {
+                return await interaction.editReply({
+                    content: `🚫 **You are banned.**\nReason: ${userData.banReason || 'Not specified'}`
+                });
+            }
+
+            // Validate requirements
+            if (game === 'codm' && !fingerCount) {
+                return await interaction.editReply({
+                    content: '❌ **Error:** CODM requires finger count selection.'
+                });
+            }
+
+            if (game === 'freefire' && (!playStyle || !experience)) {
+                return await interaction.editReply({
+                    content: '❌ **Error:** Free Fire requires play style and experience level.'
+                });
+            }
+
+            const effectiveRole = userData.role;
+
             // Call website API
             const apiUrl = 'https://gamingsensitivity.vercel.app';
             let result;
@@ -133,14 +125,11 @@ module.exports = {
             }
 
             if (!result.success) {
-                let errorMsg = `❌ **Error:** ${result.message || 'Failed to generate sensitivity'}\n\n`;
-                
+                let errorMsg = `❌ **Error:** ${result.message}\n\n`;
                 if (result.suggestions && result.suggestions.length > 0) {
-                    errorMsg += '**Did you mean:**\n';
-                    result.suggestions.forEach(s => errorMsg += `• ${s}\n`);
+                    errorMsg += '**Did you mean:**\n' + result.suggestions.map(s => `• ${s}`).join('\n');
                 }
-                
-                errorMsg += '\n📱 Visit https://gamingsensitivity.vercel.app to find the exact device name.';
+                errorMsg += '\n\n📱 Visit https://gamingsensitivity.vercel.app';
                 return await interaction.editReply(errorMsg);
             }
 
@@ -154,8 +143,12 @@ module.exports = {
             userData.lastGenerationDate = today;
             await github.saveSensiUsers(sensiData, `Generation by ${username}`);
 
-            // Log generation
-            const generationsData = await github.getSensiGenerations();
+            // Log generation - FIX: Ensure logs array exists
+            let generationsData = await github.getSensiGenerations();
+            if (!generationsData || !generationsData.logs) {
+                generationsData = { logs: [] };
+            }
+            
             generationsData.logs.push({
                 id: Date.now().toString(),
                 userId: userId,
@@ -169,31 +162,19 @@ module.exports = {
             });
             await github.saveSensiGenerations(generationsData, 'Log generation');
 
-            // Format response
+            // Send result
             const roleEmoji = effectiveRole === 'vip' ? '⭐' : '🆓';
 
             if (game === 'codm') {
                 const mp = result.data.mp;
                 const embed = new EmbedBuilder()
-                    .setTitle(`${roleEmoji} CODM Sensitivity Settings`)
+                    .setTitle(`${roleEmoji} CODM Sensitivity`)
                     .setColor(0x5865F2)
                     .setDescription(`**Device:** ${device}\n**Fingers:** ${fingerCount}`)
                     .addFields(
-                        {
-                            name: '📸 Camera & Movement',
-                            value: `Camera FPP: **${mp.cameraFpp}**\nSteering: **${mp.steeringSensitivity}**\nVertical: **${mp.verticalTurningSensitivity}**`,
-                            inline: true
-                        },
-                        {
-                            name: '🎯 ADS Sensitivity',
-                            value: `Red Dot: **${mp.redDot}**\nADS: **${mp.adsSensitivity}**\n4x Scope: **${mp.scope4x}**\nSniper: **${mp.sniperScope}**`,
-                            inline: true
-                        },
-                        {
-                            name: '🔫 Firing Sensitivity',
-                            value: `Firing Cam: **${mp.firingCameraFpp}**\nFiring Red: **${mp.firingRedDot}**\nFiring 4x: **${mp.firingScope4x}**`,
-                            inline: false
-                        }
+                        { name: 'Camera FPP', value: `${mp.cameraFpp}`, inline: true },
+                        { name: 'Red Dot', value: `${mp.redDot}`, inline: true },
+                        { name: '4x Scope', value: `${mp.scope4x}`, inline: true }
                     )
                     .setFooter({ text: 'gamingsensitivity.vercel.app' })
                     .setTimestamp();
@@ -202,29 +183,16 @@ module.exports = {
             } else {
                 const data = result.data;
                 const embed = new EmbedBuilder()
-                    .setTitle(`${roleEmoji} Free Fire Sensitivity Settings`)
-                    .setColor(effectiveRole === 'vip' ? 0xFFD700 : 0xFF4500)
-                    .setDescription(`**Device:** ${device}\n**Play Style:** ${playStyle}\n**Experience:** ${experience}\n**Calculator:** ${effectiveRole.toUpperCase()}`)
-                    .addFields({
-                        name: '🎯 Sensitivity Values',
-                        value: `General: **${data.general}**\nRed Dot: **${data.redDot}**\n2x Scope: **${data.scope2x}**\n4x Scope: **${data.scope4x}**\nSniper: **${data.sniperScope}**\nFree Look: **${data.freeLook}**`
-                    })
+                    .setTitle(`${roleEmoji} Free Fire Sensitivity`)
+                    .setColor(0xFF4500)
+                    .setDescription(`**Device:** ${device}\n**Style:** ${playStyle}`)
+                    .addFields(
+                        { name: 'General', value: `${data.general}`, inline: true },
+                        { name: 'Red Dot', value: `${data.redDot}`, inline: true },
+                        { name: '4x Scope', value: `${data.scope4x}`, inline: true }
+                    )
                     .setFooter({ text: 'gamingsensitivity.vercel.app' })
                     .setTimestamp();
-
-                if (data.recommendedDPI) {
-                    embed.addFields({
-                        name: '📋 Recommendations',
-                        value: `DPI: **${data.recommendedDPI}**\nFire Button: **${data.fireButtonSize}%**\nDrag Angle: **${data.dragAngle}°**`
-                    });
-                }
-
-                if (effectiveRole === 'free') {
-                    embed.addFields({
-                        name: '💎 Upgrade to VIP',
-                        value: 'Unlock advanced features, more play styles, and image exports!'
-                    });
-                }
 
                 await interaction.editReply({ embeds: [embed] });
             }
