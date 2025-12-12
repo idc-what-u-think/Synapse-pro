@@ -11,8 +11,13 @@ module.exports = {
             const userId = interaction.user.id;
             const username = interaction.user.username;
             
-            // Load existing users
-            const sensiData = await github.getSensiUsers();
+            // Load existing users - FIX: Handle empty/non-existent file
+            let sensiData = await github.getSensiUsers();
+            
+            // FIX: Ensure users object exists
+            if (!sensiData || !sensiData.users) {
+                sensiData = { users: {} };
+            }
             
             // Check if user already exists
             if (sensiData.users[userId]) {
@@ -53,14 +58,6 @@ module.exports = {
                     {
                         name: '🎮 Commands',
                         value: '• `/generate` - Generate sensitivity settings\n• `/sensi-profile` - View your profile'
-                    },
-                    {
-                        name: '📱 How to Use',
-                        value: '1. Visit https://gamingsensitivity.vercel.app\n2. Find your device name\n3. Use `/generate` with your device'
-                    },
-                    {
-                        name: '💎 VIP Features',
-                        value: 'Upgrade to VIP to unlock:\n• Advanced Free Fire calculator\n• 4 play styles\n• Drag speed & weapon preferences\n• Image exports'
                     }
                 )
                 .setTimestamp();
@@ -80,7 +77,7 @@ module.exports = {
         } catch (error) {
             console.error('Signup error:', error);
             await interaction.reply({
-                content: '❌ An error occurred while creating your account.',
+                content: '❌ An error occurred while creating your account. Please try again.',
                 ephemeral: true
             });
         }
