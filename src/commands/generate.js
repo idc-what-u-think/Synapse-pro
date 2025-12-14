@@ -168,13 +168,25 @@ module.exports = {
             if (game === 'codm') {
                 const mp = result.data.mp;
                 const embed = new EmbedBuilder()
-                    .setTitle(`${roleEmoji} CODM Sensitivity`)
+                    .setTitle(`${roleEmoji} CODM Sensitivity Settings`)
                     .setColor(0x5865F2)
                     .setDescription(`**Device:** ${device}\n**Fingers:** ${fingerCount}`)
                     .addFields(
-                        { name: 'Camera FPP', value: `${mp.cameraFpp}`, inline: true },
-                        { name: 'Red Dot', value: `${mp.redDot}`, inline: true },
-                        { name: '4x Scope', value: `${mp.scope4x}`, inline: true }
+                        {
+                            name: '📸 Camera & Movement',
+                            value: `Camera FPP: **${mp.cameraFpp}**\nSteering: **${mp.steeringSensitivity}**\nVertical: **${mp.verticalTurningSensitivity}**`,
+                            inline: true
+                        },
+                        {
+                            name: '🎯 ADS Sensitivity',
+                            value: `Red Dot: **${mp.redDot}**\nADS: **${mp.adsSensitivity}**\n4x Scope: **${mp.scope4x}**\nSniper: **${mp.sniperScope}**`,
+                            inline: true
+                        },
+                        {
+                            name: '🔫 Firing Sensitivity',
+                            value: `Firing Cam: **${mp.firingCameraFpp}**\nFiring Red: **${mp.firingRedDot}**\nFiring 4x: **${mp.firingScope4x}**`,
+                            inline: false
+                        }
                     )
                     .setFooter({ text: 'gamingsensitivity.vercel.app' })
                     .setTimestamp();
@@ -183,16 +195,25 @@ module.exports = {
             } else {
                 const data = result.data;
                 const embed = new EmbedBuilder()
-                    .setTitle(`${roleEmoji} Free Fire Sensitivity`)
+                    .setTitle(`${roleEmoji} Free Fire Sensitivity Settings`)
                     .setColor(0xFF4500)
-                    .setDescription(`**Device:** ${device}\n**Style:** ${playStyle}`)
+                    .setDescription(`**Device:** ${device}\n**Style:** ${playStyle}\n**Experience:** ${experience}`)
                     .addFields(
-                        { name: 'General', value: `${data.general}`, inline: true },
-                        { name: 'Red Dot', value: `${data.redDot}`, inline: true },
-                        { name: '4x Scope', value: `${data.scope4x}`, inline: true }
+                        {
+                            name: '🎯 Sensitivity Values',
+                            value: `General: **${data.general}**\nRed Dot: **${data.redDot}**\n2x Scope: **${data.scope2x}**\n4x Scope: **${data.scope4x}**\nSniper: **${data.sniperScope}**\nFree Look: **${data.freeLook}**`,
+                            inline: false
+                        }
                     )
                     .setFooter({ text: 'gamingsensitivity.vercel.app' })
                     .setTimestamp();
+
+                if (data.recommendedDPI) {
+                    embed.addFields({
+                        name: '📋 Recommendations',
+                        value: `DPI: **${data.recommendedDPI}**\nFire Button: **${data.fireButtonSize}%**\nDrag Angle: **${data.dragAngle}°**`
+                    });
+                }
 
                 await interaction.editReply({ embeds: [embed] });
             }
