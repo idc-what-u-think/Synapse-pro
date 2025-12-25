@@ -523,6 +523,78 @@ client.once('ready', async () => {
     console.log('Reminder checker started (every 60 seconds)');
 });
 
+// ============================================
+// NEW: AUTO-LEAVE NON-WHITELISTED SERVERS
+// ============================================
+client.on('guildCreate', async (guild) => {
+    console.log(`[GUILD JOIN] Bot added to: ${guild.name} (${guild.id})`);
+
+    try {
+        const { getData } = require('./src/utils/github');
+        let whitelist = [];
+        
+        try {
+            const data = await getData('whitelist.json');
+            whitelist = data.servers || [];
+        } catch (error) {
+            whitelist = [];
+        }
+
+        if (!whitelist.includes(guild.id)) {
+            console.log(`[AUTO-LEAVE] Unauthorized server detected: ${guild.name} (${guild.id})`);
+
+            // Notify bot owner
+            const ownerId = process.env.OWNER_ID;
+            if (ownerId) {
+                try {
+                    const owner = await client.users.fetch(ownerId);
+                    const embed = new EmbedBuilder()
+                        .setTitle('⚠️ Bot Added to Non-Whitelisted Server')
+                        .setDescription('The bot was added to an unauthorized server and automatically left.')
+                        .addFields(
+                            { name: '🏷️ Server Name', value: guild.name, inline: true },
+                            { name: '🆔 Server ID', value: guild.id, inline: true },
+                            { name: '👥 Members', value: guild.memberCount.toString(), inline: true },
+                            { name: '👑 Owner', value: `<@${guild.ownerId}>`, inline: true }
+                        )
+                        .setColor(0xFF0000)
+                        .setFooter({ text: 'Use /whitelist in the server to authorize it' })
+                        .setTimestamp();
+                    
+                    await owner.send({ embeds: [embed] });
+                } catch (error) {
+                    console.error('[AUTO-LEAVE] Could not notify bot owner:', error);
+                }
+            }
+
+            // Try to DM the server owner
+            try {
+                const owner = await guild.fetchOwner();
+                await owner.send({
+                    embeds: [{
+                        title: '🔒 Private Bot',
+                        description: `Thank you for adding my bot to **${guild.name}**!\n\nHowever, this bot is **private** and only available for authorized servers. The bot will now leave your server.\n\nIf you believe this is a mistake or would like to request access, please contact the bot owner.`,
+                        color: 0xFF6B6B,
+                        timestamp: new Date()
+                    }]
+                });
+            } catch (error) {
+                console.log(`[AUTO-LEAVE] Could not DM owner of ${guild.name}`);
+            }
+
+            // Leave the server
+            await guild.leave();
+            console.log(`[AUTO-LEAVE] Left unauthorized server: ${guild.name}`);
+        } else {
+            console.log(`[AUTO-LEAVE] Authorized server: ${guild.name} (${guild.id})`);
+        }
+    } catch (error) {
+        console.error('[AUTO-LEAVE] Error processing guild join:', error);
+        // If there's an error checking whitelist, leave to be safe
+        await guild.leave();
+    }
+});
+
 client.on('inviteCreate', async (invite) => {
     try {
         if (!client.inviteCache) {
