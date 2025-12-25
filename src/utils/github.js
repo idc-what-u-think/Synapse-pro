@@ -22,6 +22,7 @@ const FILE_PATHS = {
     referral_links: 'data/referrals/links.json',
     referral_tracking: 'data/referrals/tracking.json',
     setup_cooldowns: 'data/setup/cooldowns.json',
+    whitelist: 'data/whitelist.json',
     
     // NEW: Sensitivity Generator Data
     sensi_users: 'data/sensitivity/users.json',
