@@ -1,8 +1,8 @@
-const { Octokit } = require('@octokit/rest');
+const fs = require('fs').promises;
+const path = require('path');
 
-const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
-const owner = process.env.GITHUB_OWNER;
-const repo = process.env.GITHUB_REPO;
+// Base data directory
+const DATA_DIR = path.join(__dirname, '..', 'data');
 
 const FILE_PATHS = {
     config: 'data/config.json',
@@ -24,7 +24,7 @@ const FILE_PATHS = {
     setup_cooldowns: 'data/setup/cooldowns.json',
     whitelist: 'data/whitelist.json',
     
-    // NEW: Sensitivity Generator Data
+    // Sensitivity Generator Data
     sensi_users: 'data/sensitivity/users.json',
     sensi_generations: 'data/sensitivity/generations.json',
     sensi_servers: 'data/sensitivity/servers.json',
@@ -34,70 +34,61 @@ const FILE_PATHS = {
     sensi_broadcast_history: 'data/sensitivity/broadcast_history.json',
 };
 
-async function initializeRepo(octokit, owner, repo) {
+// Ensure directory exists
+async function ensureDirectory(dirPath) {
     try {
-        await octokit.rest.repos.get({ owner, repo });
-        return true;
+        await fs.mkdir(dirPath, { recursive: true });
     } catch (error) {
-        if (error.status === 404) {
-            const newRepo = await octokit.rest.repos.createForAuthenticatedUser({
-                name: repo,
-                auto_init: true,
-                private: true,
-                description: 'Discord bot data storage'
-            });
-            return newRepo;
-        } else {
+        if (error.code !== 'EEXIST') {
             throw error;
         }
     }
 }
 
-async function ensureDirectory(dirPath) {
+// Initialize data directory structure
+async function initializeDataDirectory() {
     try {
-        await octokit.rest.repos.getContent({
-            owner,
-            repo,
-            path: dirPath
-        });
-    } catch (error) {
-        if (error.status === 404) {
-            try {
-                await octokit.rest.repos.createOrUpdateFileContents({
-                    owner,
-                    repo,
-                    path: `${dirPath}/.gitkeep`,
-                    message: `Create directory: ${dirPath}`,
-                    content: Buffer.from('').toString('base64')
-                });
-            } catch (createError) {
-                if (createError.status !== 422) {
-                    throw createError;
-                }
-            }
+        await ensureDirectory(DATA_DIR);
+        
+        const directories = [
+            'moderation',
+            'leveling',
+            'features',
+            'giveaways',
+            'economy',
+            'games',
+            'referrals',
+            'setup',
+            'sensitivity'
+        ];
+        
+        for (const dir of directories) {
+            await ensureDirectory(path.join(DATA_DIR, dir));
         }
+        
+        return true;
+    } catch (error) {
+        console.error('Error initializing data directory:', error);
+        return false;
     }
 }
 
+// Get data from local file
 async function getData(pathOrKey) {
     try {
         if (!pathOrKey) {
             throw new Error('Path parameter is required');
         }
         
-        await initializeRepo(octokit, owner, repo);
-        const path = FILE_PATHS[pathOrKey] || pathOrKey;
+        await initializeDataDirectory();
         
-        const response = await octokit.rest.repos.getContent({
-            owner,
-            repo,
-            path,
-        });
+        const filePath = FILE_PATHS[pathOrKey] || pathOrKey;
+        const fullPath = path.join(__dirname, '..', filePath);
         
-        const data = JSON.parse(Buffer.from(response.data.content, 'base64').toString());
-        return data;
+        const fileContent = await fs.readFile(fullPath, 'utf8');
+        return JSON.parse(fileContent);
     } catch (error) {
-        if (error.status === 404) {
+        if (error.code === 'ENOENT') {
             return {};
         }
         console.error(`Error getting data from ${pathOrKey}:`, error.message);
@@ -105,62 +96,34 @@ async function getData(pathOrKey) {
     }
 }
 
+// Save data to local file
 async function saveData(pathOrKey, content, message = 'Update data', maxRetries = 3) {
     let attempt = 0;
     
     while (attempt < maxRetries) {
         try {
-            await initializeRepo(octokit, owner, repo);
-            const path = FILE_PATHS[pathOrKey] || pathOrKey;
+            await initializeDataDirectory();
             
-            const pathParts = path.split('/');
-            if (pathParts.length > 1) {
-                for (let i = 1; i < pathParts.length; i++) {
-                    const dirPath = pathParts.slice(0, i).join('/');
-                    if (dirPath) {
-                        await ensureDirectory(dirPath);
-                    }
-                }
-            }
+            const filePath = FILE_PATHS[pathOrKey] || pathOrKey;
+            const fullPath = path.join(__dirname, '..', filePath);
             
-            let sha;
-            try {
-                const existing = await octokit.rest.repos.getContent({
-                    owner,
-                    repo,
-                    path,
-                });
-                sha = existing.data.sha;
-            } catch (error) {
-                if (error.status !== 404) {
-                    throw error;
-                }
-            }
-
-            const params = {
-                owner,
-                repo,
-                path,
-                message: message || `Update ${path}`,
-                content: Buffer.from(JSON.stringify(content, null, 2)).toString('base64'),
-            };
+            // Ensure parent directory exists
+            const parentDir = path.dirname(fullPath);
+            await ensureDirectory(parentDir);
             
-            if (sha) params.sha = sha;
-
-            const result = await octokit.rest.repos.createOrUpdateFileContents(params);
-            return result;
+            // Write file
+            await fs.writeFile(fullPath, JSON.stringify(content, null, 2), 'utf8');
+            
+            return { success: true };
             
         } catch (error) {
-            if (error.status === 409 && attempt < maxRetries - 1) {
+            if (attempt < maxRetries - 1) {
                 attempt++;
                 await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
                 continue;
             }
             
             console.error(`Error saving data to ${pathOrKey}:`, error.message);
-            if (error.status === 403) {
-                console.error('Permission denied. Check your GitHub token permissions.');
-            }
             throw error;
         }
     }
@@ -313,7 +276,7 @@ async function saveSetupCooldowns(cooldowns, message = 'Update setup cooldowns')
 }
 
 // ============================================
-// NEW: SENSITIVITY GENERATOR FUNCTIONS
+// SENSITIVITY GENERATOR FUNCTIONS
 // ============================================
 
 // Users Management
@@ -597,6 +560,7 @@ async function saveSensiApiKeys(keys, message = 'Update API keys') {
 
 async function createApiKey(name, createdBy) {
     const data = await getSensiApiKeys();
+    const crypto = require('crypto');
     const keyValue = `sk_${crypto.randomUUID().replace(/-/g, '')}`;
     
     data.keys.push({
@@ -710,39 +674,17 @@ function getDailyGenerations(logs, days = 7) {
         .reverse();
 }
 
-// Test Permissions
+// Test Permissions (now just checks if we can write locally)
 async function testPermissions() {
     try {
-        const { data: tokenData } = await octokit.rest.users.getAuthenticated();
-        const { data: repoData } = await octokit.rest.repos.get({ owner, repo });
-
-        const testFilePath = '.github/test-write-access';
-        try {
-            await octokit.rest.repos.createOrUpdateFileContents({
-                owner,
-                repo,
-                path: testFilePath,
-                message: 'Test write access',
-                content: Buffer.from('test').toString('base64'),
-            });
-            
-            const { data: fileData } = await octokit.rest.repos.getContent({
-                owner,
-                repo,
-                path: testFilePath,
-            });
-            await octokit.rest.repos.deleteFile({
-                owner,
-                repo,
-                path: testFilePath,
-                message: 'Remove test write access file',
-                sha: fileData.sha,
-            });
-            return true;
-        } catch (writeError) {
-            console.error('Write permission test failed:', writeError.message);
-            return false;
-        }
+        await initializeDataDirectory();
+        const testPath = path.join(DATA_DIR, 'test-write-access.json');
+        
+        await fs.writeFile(testPath, JSON.stringify({ test: true }), 'utf8');
+        await fs.readFile(testPath, 'utf8');
+        await fs.unlink(testPath);
+        
+        return true;
     } catch (error) {
         console.error('Permission test failed:', error.message);
         return false;
@@ -787,7 +729,7 @@ module.exports = {
     getSetupCooldowns,
     saveSetupCooldowns,
     
-    // NEW: Sensitivity Generator Functions
+    // Sensitivity Generator Functions
     // Users
     getSensiUsers,
     saveSensiUsers,
