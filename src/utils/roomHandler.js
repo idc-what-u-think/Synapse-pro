@@ -4,7 +4,8 @@ const github = require('./github');
 const GAMES = {
     typing_race: { name: 'Typing Race', emoji: '⌨️', minPlayers: 2, maxPlayers: 10 },
     wyr: { name: 'Would You Rather', emoji: '🤔', minPlayers: 10, maxPlayers: 10 },
-    reaction: { name: 'Fast Reaction', emoji: '⚡', minPlayers: 2, maxPlayers: 10 }
+    reaction: { name: 'Fast Reaction', emoji: '⚡', minPlayers: 2, maxPlayers: 10 },
+    wordchain: { name: 'Word Chain', emoji: '🔗', minPlayers: 2, maxPlayers: 10 }
 };
 
 async function updateRoomEmbed(client, roomId, room) {
@@ -549,6 +550,9 @@ async function handleStartGame(interaction, roomId) {
         } else if (room.gameId === 'reaction') {
             const reaction = require('../games/reaction');
             await reaction.startGame(interaction.client, roomId, room, interaction);
+        } else if (room.gameId === 'wordchain') {
+            const wordchain = require('../games/wordchain');
+            await wordchain.startGame(interaction.client, roomId, room, interaction);
         }
 
     } catch (error) {
