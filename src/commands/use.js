@@ -4,7 +4,8 @@ const github = require('../utils/github');
 const GAMES = {
     typing_race: { name: 'Typing Race', emoji: '⌨️', description: 'Type the phrase as fast as you can!' },
     wyr: { name: 'Would You Rather', emoji: '🤔', description: 'Vote and survive to win!' },
-    reaction: { name: 'Fast Reaction', emoji: '⚡', description: 'React with the correct emoji!' }
+    reaction: { name: 'Fast Reaction', emoji: '⚡', description: 'React with the correct emoji!' },
+    wordchain: { name: 'Word Chain', emoji: '🔗', description: 'Chain words together using last letters!' }
 };
 
 module.exports = {
@@ -28,21 +29,6 @@ module.exports = {
         if (item !== 'roomcard') {
             return await interaction.reply({
                 content: '❌ Invalid item!',
-                ephemeral: true
-            });
-        }
-
-        const gameChannelId = process.env.GAME_CHANNEL_ID;
-        if (!gameChannelId) {
-            return await interaction.reply({
-                content: '❌ Game channel not configured. Please contact an administrator.',
-                ephemeral: true
-            });
-        }
-
-        if (interaction.channel.id !== gameChannelId) {
-            return await interaction.reply({
-                content: `❌ You can only use Room Cards in the game channel: <#${gameChannelId}>`,
                 ephemeral: true
             });
         }
