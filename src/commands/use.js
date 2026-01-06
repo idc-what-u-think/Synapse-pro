@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, PermissionFlagsBits } = require('discord.js');
 const github = require('../utils/github');
 
 const GAMES = {
@@ -34,32 +34,39 @@ module.exports = {
         }
 
         try {
+            // Check if user is an admin
+            const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
+            
             const inventory = await github.getInventory();
             const activeRooms = await github.getActiveRooms();
 
-            if (!inventory[userId] || !inventory[userId].roomcard || inventory[userId].roomcard.length === 0) {
-                return await interaction.reply({
-                    content: '❌ You don\'t have any Room Cards!\n\nVisit `/shop` to purchase one.',
-                    ephemeral: true
-                });
+            // If not admin, check for room cards
+            if (!isAdmin) {
+                if (!inventory[userId] || !inventory[userId].roomcard || inventory[userId].roomcard.length === 0) {
+                    return await interaction.reply({
+                        content: '❌ You don\'t have any Room Cards!\n\nVisit `/shop` to purchase one.',
+                        ephemeral: true
+                    });
+                }
+
+                const now = Date.now();
+                const validCards = inventory[userId].roomcard.filter(card => 
+                    !card.used && card.expiryDate > now
+                );
+
+                if (validCards.length === 0) {
+                    return await interaction.reply({
+                        content: '❌ You don\'t have any valid Room Cards!\n\nAll your cards have expired or been used. Visit `/shop` to purchase more.',
+                        ephemeral: true
+                    });
+                }
             }
 
+            // Check for active rooms
             const userHasActiveRoom = Object.values(activeRooms).some(room => room.ownerId === userId);
             if (userHasActiveRoom) {
                 return await interaction.reply({
                     content: '❌ You already have an active room! Close it before creating a new one.',
-                    ephemeral: true
-                });
-            }
-
-            const now = Date.now();
-            const validCards = inventory[userId].roomcard.filter(card => 
-                !card.used && card.expiryDate > now
-            );
-
-            if (validCards.length === 0) {
-                return await interaction.reply({
-                    content: '❌ You don\'t have any valid Room Cards!\n\nAll your cards have expired or been used. Visit `/shop` to purchase more.',
                     ephemeral: true
                 });
             }
@@ -78,8 +85,10 @@ module.exports = {
 
             const row = new ActionRowBuilder().addComponents(selectMenu);
 
+            const adminNote = isAdmin ? '\n\n👑 **Admin Access** - No room card required!' : '';
+
             await interaction.reply({
-                content: '🎮 Select a game to create a room:',
+                content: `🎮 Select a game to create a room:${adminNote}`,
                 components: [row],
                 ephemeral: true
             });
@@ -156,23 +165,30 @@ module.exports = {
         const game = GAMES[gameId];
 
         try {
+            // Check if user is an admin
+            const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
+            
             const inventory = await github.getInventory();
             const activeRooms = await github.getActiveRooms();
 
-            const now = Date.now();
-            const validCards = inventory[userId].roomcard.filter(card => 
-                !card.used && card.expiryDate > now
-            );
+            // Only consume room card if user is NOT an admin
+            if (!isAdmin) {
+                const now = Date.now();
+                const validCards = inventory[userId].roomcard.filter(card => 
+                    !card.used && card.expiryDate > now
+                );
 
-            if (validCards.length === 0) {
-                return await interaction.reply({
-                    content: '❌ No valid Room Cards found!',
-                    ephemeral: true
-                });
+                if (validCards.length === 0) {
+                    return await interaction.reply({
+                        content: '❌ No valid Room Cards found!',
+                        ephemeral: true
+                    });
+                }
+
+                // Mark the room card as used
+                validCards[0].used = true;
+                await github.saveInventory(inventory);
             }
-
-            validCards[0].used = true;
-            await github.saveInventory(inventory);
 
             const roomId = `${userId}_${Date.now()}`;
             const embed = new EmbedBuilder()
@@ -246,9 +262,16 @@ module.exports = {
 
             await github.saveActiveRooms(activeRooms);
 
-            const replyContent = password 
-                ? `✅ Room created successfully with password: **${password}**`
-                : '✅ Room created successfully!';
+            let replyContent;
+            if (isAdmin) {
+                replyContent = password 
+                    ? `✅ Room created successfully with password: **${password}**\n👑 Admin access - No room card used!`
+                    : '✅ Room created successfully!\n👑 Admin access - No room card used!';
+            } else {
+                replyContent = password 
+                    ? `✅ Room created successfully with password: **${password}**`
+                    : '✅ Room created successfully!';
+            }
 
             if (interaction.replied || interaction.deferred) {
                 await interaction.followUp({
