@@ -13,13 +13,57 @@ async function validateWord(word) {
     }
 }
 
-function getRandomLetterCount() {
-    const weights = [0.5, 0.3, 0.2]; // 50% chance for 1, 30% for 2, 20% for 3
-    const random = Math.random();
+// New function to check if any words exist starting with given letters
+async function checkWordsExist(letters) {
+    try {
+        // Try a few common words that might start with these letters
+        const commonPrefixes = [
+            letters,
+            letters + 'a',
+            letters + 'e',
+            letters + 'i',
+            letters + 'o',
+            letters + 'u'
+        ];
+        
+        for (const prefix of commonPrefixes) {
+            const response = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${prefix.toLowerCase()}`);
+            if (response.ok) {
+                return true;
+            }
+        }
+        return false;
+    } catch (error) {
+        console.error('Error checking if words exist:', error);
+        return false;
+    }
+}
+
+// Improved function to get valid letter count
+async function getValidLetterCount(word) {
+    const wordLength = word.length;
     
-    if (random < weights[0]) return 1;
-    if (random < weights[0] + weights[1]) return 2;
-    return 3;
+    // Try 3 letters first (if word is long enough)
+    if (wordLength >= 3) {
+        const threeLetters = word.slice(-3);
+        const hasWords = await checkWordsExist(threeLetters);
+        if (hasWords) {
+            return { count: 3, letters: threeLetters };
+        }
+    }
+    
+    // Try 2 letters next (if word is long enough)
+    if (wordLength >= 2) {
+        const twoLetters = word.slice(-2);
+        const hasWords = await checkWordsExist(twoLetters);
+        if (hasWords) {
+            return { count: 2, letters: twoLetters };
+        }
+    }
+    
+    // Fall back to 1 letter (always should have words)
+    const oneLetter = word.slice(-1);
+    return { count: 1, letters: oneLetter };
 }
 
 async function startGame(client, roomId, room, interaction) {
@@ -131,16 +175,10 @@ async function playGame(client, roomId, room) {
                 // Word is valid
                 usedWords.add(word);
                 
-                // Determine next letter count randomly
-                letterCount = getRandomLetterCount();
-                const wordLength = word.length;
-                
-                if (letterCount > wordLength) {
-                    letterCount = wordLength;
-                }
-                
-                // Get last N letters
-                currentLetters = word.slice(-letterCount).toUpperCase();
+                // Get valid letter count and letters (IMPROVED)
+                const result = await getValidLetterCount(word);
+                letterCount = result.count;
+                currentLetters = result.letters.toUpperCase();
                 
                 const successEmbed = new EmbedBuilder()
                     .setColor('#00ff00')
