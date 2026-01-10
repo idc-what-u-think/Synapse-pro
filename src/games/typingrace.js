@@ -1,49 +1,85 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const github = require('../utils/github');
-const { getAIInstance, GEMINI_KEYS } = require('../events/messageCreate');
 
-// Fallback phrases in case AI fails
-const FALLBACK_PHRASES = [
-    'the quick brown fox jumps over the lazy dog',
-    'practice makes perfect when you type every day',
-    'discord servers bring communities together online',
-    'coding requires patience and constant learning',
-    'gaming with friends creates lasting memories'
+// 600+ random words for typing challenges
+const WORD_POOL = [
+    'abandon', 'ability', 'absolute', 'abstract', 'abundant', 'academic', 'accelerate', 'accent', 'accept', 'access',
+    'accident', 'accompany', 'accomplish', 'account', 'accurate', 'achieve', 'acknowledge', 'acquire', 'across', 'action',
+    'activate', 'active', 'actual', 'adapt', 'addition', 'address', 'adequate', 'adjust', 'admire', 'admit',
+    'adopt', 'adult', 'advance', 'advantage', 'adventure', 'advertise', 'advice', 'advocate', 'aesthetic', 'affect',
+    'afford', 'afraid', 'after', 'again', 'against', 'agency', 'agenda', 'agent', 'aggressive', 'agree',
+    'agriculture', 'ahead', 'aircraft', 'airport', 'album', 'alcohol', 'alert', 'alien', 'align', 'alive',
+    'allegation', 'alliance', 'allocate', 'allow', 'almost', 'alone', 'along', 'already', 'although', 'always',
+    'amazing', 'ambient', 'ambition', 'ambulance', 'amend', 'amount', 'analyze', 'ancient', 'anger', 'angle',
+    'animal', 'animate', 'announce', 'annual', 'anonymous', 'another', 'answer', 'anticipate', 'anxiety', 'anybody',
+    'anymore', 'anyone', 'anything', 'anyway', 'anywhere', 'apart', 'apartment', 'apologize', 'apparent', 'appeal',
+    'appear', 'append', 'appetite', 'apple', 'application', 'apply', 'appoint', 'appreciate', 'approach', 'appropriate',
+    'approve', 'approximate', 'arbitrary', 'architect', 'archive', 'argue', 'arise', 'armor', 'around', 'arrange',
+    'array', 'arrest', 'arrival', 'arrive', 'arrow', 'article', 'artificial', 'artist', 'artistic', 'ascend',
+    'ashamed', 'aside', 'aspect', 'assault', 'assemble', 'assert', 'assess', 'asset', 'assign', 'assist',
+    'associate', 'assume', 'assure', 'astonish', 'athlete', 'atmosphere', 'attach', 'attack', 'attain', 'attempt',
+    'attend', 'attention', 'attitude', 'attorney', 'attract', 'attribute', 'auction', 'audience', 'audio', 'audit',
+    'august', 'author', 'authority', 'automatic', 'autumn', 'available', 'avenue', 'average', 'aviation', 'avoid',
+    'awake', 'award', 'aware', 'awesome', 'awful', 'awkward', 'axis', 'bachelor', 'background', 'backup',
+    'backward', 'bacteria', 'balance', 'balcony', 'balloon', 'ballot', 'banana', 'band', 'banner', 'bargain',
+    'barrel', 'barrier', 'baseline', 'basic', 'basket', 'battery', 'battle', 'beach', 'beam', 'bean',
+    'bear', 'beat', 'beautiful', 'beauty', 'because', 'become', 'bedroom', 'before', 'begin', 'behavior',
+    'behind', 'being', 'belief', 'believe', 'belong', 'below', 'belt', 'bench', 'beneath', 'benefit',
+    'beside', 'best', 'better', 'between', 'beyond', 'bicycle', 'billion', 'binary', 'biology', 'bird',
+    'birth', 'birthday', 'bishop', 'bitter', 'bizarre', 'black', 'blade', 'blame', 'blanket', 'blast',
+    'bleed', 'blend', 'bless', 'blind', 'block', 'blood', 'bloom', 'blossom', 'blow', 'blue',
+    'board', 'boat', 'body', 'boil', 'bold', 'bomb', 'bond', 'bone', 'bonus', 'book',
+    'boom', 'boost', 'boot', 'border', 'boring', 'born', 'borrow', 'boss', 'both', 'bother',
+    'bottle', 'bottom', 'bounce', 'boundary', 'bowl', 'box', 'brain', 'branch', 'brand', 'brave',
+    'bread', 'break', 'breakfast', 'breath', 'breathe', 'breed', 'breeze', 'brick', 'bridge', 'brief',
+    'bright', 'brilliant', 'bring', 'broad', 'broadcast', 'broken', 'bronze', 'brother', 'brown', 'brush',
+    'bubble', 'bucket', 'budget', 'buffalo', 'buffer', 'build', 'building', 'bullet', 'bundle', 'burden',
+    'bureau', 'burn', 'burst', 'bury', 'business', 'busy', 'button', 'buyer', 'cabin', 'cabinet',
+    'cable', 'cache', 'cafe', 'cage', 'cake', 'calculate', 'calendar', 'call', 'calm', 'camera',
+    'campaign', 'campus', 'cancel', 'cancer', 'candidate', 'candle', 'candy', 'cannon', 'canvas', 'capable',
+    'capacity', 'capital', 'captain', 'capture', 'carbon', 'card', 'care', 'career', 'careful', 'cargo',
+    'carpet', 'carriage', 'carrier', 'carry', 'cart', 'case', 'cash', 'castle', 'casual', 'catalog',
+    'catch', 'category', 'cathedral', 'cattle', 'cause', 'caution', 'cave', 'cease', 'ceiling', 'celebrate',
+    'celebrity', 'cell', 'cement', 'cemetery', 'census', 'center', 'central', 'century', 'ceremony', 'certain',
+    'certificate', 'chain', 'chair', 'chairman', 'challenge', 'chamber', 'champion', 'chance', 'change', 'channel',
+    'chaos', 'chapter', 'character', 'charge', 'charity', 'charm', 'chart', 'chase', 'cheap', 'cheat',
+    'check', 'cheek', 'cheer', 'cheese', 'chef', 'chemical', 'chemistry', 'cherry', 'chess', 'chest',
+    'chicken', 'chief', 'child', 'childhood', 'chill', 'chimney', 'china', 'chip', 'chocolate', 'choice',
+    'choose', 'chord', 'chorus', 'chronic', 'church', 'cigarette', 'cinema', 'circle', 'circuit', 'circulate',
+    'citizen', 'city', 'civil', 'civilian', 'claim', 'clap', 'clarify', 'clarity', 'clash', 'class',
+    'classic', 'classroom', 'clean', 'clear', 'clerk', 'clever', 'click', 'client', 'cliff', 'climate',
+    'climb', 'clinic', 'clock', 'close', 'closet', 'cloth', 'clothes', 'cloud', 'club', 'clue',
+    'cluster', 'coach', 'coal', 'coalition', 'coast', 'coat', 'code', 'coffee', 'cognitive', 'coherent',
+    'coin', 'cold', 'collapse', 'collar', 'colleague', 'collect', 'collection', 'collective', 'college', 'collision',
+    'colonial', 'colony', 'color', 'column', 'combat', 'combination', 'combine', 'come', 'comedy', 'comfort',
+    'comic', 'command', 'comment', 'commerce', 'commercial', 'commission', 'commit', 'committee', 'common', 'communicate',
+    'community', 'compact', 'companion', 'company', 'compare', 'comparison', 'compassion', 'compel', 'compensate', 'compete',
+    'competition', 'compile', 'complain', 'complaint', 'complete', 'complex', 'complicate', 'component', 'compose', 'composition',
+    'compound', 'comprehensive', 'compress', 'comprise', 'compromise', 'compute', 'computer', 'conceal', 'concede', 'conceive',
+    'concentrate', 'concentration', 'concept', 'concern', 'concert', 'conclude', 'conclusion', 'concrete', 'condemn', 'condition',
+    'conduct', 'conference', 'confess', 'confidence', 'confident', 'confine', 'confirm', 'conflict', 'conform', 'confront',
+    'confuse', 'confusion', 'congress', 'connect', 'connection', 'conquer', 'conscience', 'conscious', 'consensus', 'consent',
+    'consequence', 'conservative', 'consider', 'consist', 'consistent', 'constant', 'constitute', 'construct', 'consult', 'consumer',
+    'contact', 'contain', 'contemporary', 'contempt', 'content', 'contest', 'context', 'continent', 'continue', 'contract',
+    'contradict', 'contrary', 'contrast', 'contribute', 'control', 'controversy', 'convention', 'conversation', 'convert', 'convey',
+    'convict', 'convince', 'cook', 'cool', 'cooperate', 'coordinate', 'cope', 'copper', 'copy', 'core',
+    'corn', 'corner', 'corporate', 'correct', 'correlate', 'correspond', 'corridor', 'corrupt', 'cost', 'costume',
+    'cottage', 'cotton', 'couch', 'could', 'council', 'counsel', 'count', 'counter', 'country', 'county',
+    'couple', 'courage', 'course', 'court', 'courtesy', 'cousin', 'cover', 'coverage', 'crack', 'craft',
+    'crash', 'crazy', 'cream', 'create', 'creation', 'creative', 'creature', 'credit', 'creek', 'crew',
+    'crime', 'criminal', 'crisis', 'criteria', 'critic', 'critical', 'criticism', 'criticize', 'crop', 'cross',
+    'crowd', 'crown', 'crucial', 'crude', 'cruise', 'crush', 'crystal', 'culture', 'curious', 'currency',
+    'current', 'curriculum', 'curse', 'curtain', 'curve', 'cushion', 'custom', 'customer', 'cycle', 'daily',
+    'damage', 'dance', 'danger', 'dangerous', 'dare', 'dark', 'darkness', 'data', 'database', 'date',
+    'daughter', 'dawn', 'dead', 'deadline', 'deadly', 'deal', 'dealer', 'dear', 'death', 'debate',
+    'debris', 'debt', 'decade', 'decay', 'deceive', 'decent', 'decide', 'decision', 'deck', 'declare',
+    'decline', 'decorate', 'decrease', 'dedicate', 'deep', 'defeat', 'defend', 'defense', 'defensive', 'deficit',
+    'define', 'definite', 'definition', 'degree', 'delay', 'delete', 'deliberate', 'delicate', 'delight', 'deliver',
+    'delivery', 'demand', 'democracy', 'democratic', 'demonstrate', 'denial', 'denounce', 'dense', 'density', 'deny'
 ];
 
-async function generatePhrase(difficulty = 'medium') {
-    try {
-        if (GEMINI_KEYS.length === 0) {
-            console.log('No AI keys available, using fallback phrase');
-            return FALLBACK_PHRASES[Math.floor(Math.random() * FALLBACK_PHRASES.length)];
-        }
-
-        const aiInstance = getAIInstance();
-        
-        let prompt;
-        switch(difficulty) {
-            case 'easy':
-                prompt = "Generate a simple, casual sentence between 6-8 words. Make it easy to type with common words. Just return the sentence, nothing else.";
-                break;
-            case 'hard':
-                prompt = "Generate a challenging sentence between 12-15 words with some uncommon words. Make it harder to type. Just return the sentence, nothing else.";
-                break;
-            default: // medium
-                prompt = "Generate a random interesting sentence between 8-12 words. Mix common and slightly uncommon words. Just return the sentence, nothing else.";
-        }
-
-        const result = await aiInstance.model.generateContent(prompt);
-        const phrase = result.response.text().trim().replace(/["""]/g, '').replace(/\.$/, '');
-        
-        console.log(`AI generated phrase (${difficulty}): ${phrase}`);
-        return phrase;
-        
-    } catch (error) {
-        console.error('Error generating AI phrase:', error);
-        console.log('Using fallback phrase due to error');
-        return FALLBACK_PHRASES[Math.floor(Math.random() * FALLBACK_PHRASES.length)];
-    }
-}
+// Active game sessions tracker
+const activeGames = new Map();
 
 async function startGame(client, roomId, room, interaction) {
     try {
@@ -64,7 +100,6 @@ async function startGame(client, roomId, room, interaction) {
 
         await channel.send({ embeds: [embed], components: [row] });
         
-        // Acknowledge the interaction if provided
         if (interaction && !interaction.replied && !interaction.deferred) {
             await interaction.deferUpdate();
         }
@@ -121,41 +156,48 @@ async function handleRoundsModal(interaction, roomId) {
     }
 }
 
+function generatePhrase() {
+    const wordCount = Math.floor(Math.random() * 3) + 6; // 6-8 words
+    const shuffled = [...WORD_POOL].sort(() => Math.random() - 0.5);
+    const selectedWords = shuffled.slice(0, wordCount);
+    return selectedWords.join(' ');
+}
+
 async function playRounds(client, roomId, totalRounds) {
+    // Check if game is already running
+    if (activeGames.has(roomId)) {
+        console.log(`Game already running for room ${roomId}, ignoring duplicate start`);
+        return;
+    }
+
+    // Mark game as active
+    activeGames.set(roomId, { active: true, currentRound: 0 });
+
     try {
         const activeRooms = await github.getActiveRooms();
         const room = activeRooms[roomId];
 
         if (!room) {
             console.error('Room not found:', roomId);
+            activeGames.delete(roomId);
             return;
         }
 
         const channel = await client.channels.fetch(room.channelId);
-        let rewards = await github.getGameRewards();
-        
-        console.log('Game rewards loaded:', rewards);
-        
-        // Initialize rewards if empty or invalid
-        if (!rewards || !rewards.typing_race_round) {
-            console.log('Initializing default game rewards...');
-            rewards = {
-                typing_race_round: { coins: 50, bucks: 0 },
-                wyr_winner: { coins: 300, bucks: 2 },
-                reaction_winner: { coins: 100, bucks: 1 }
-            };
-            await github.saveGameRewards(rewards);
-            console.log('Default rewards saved:', rewards);
-        }
 
         for (let round = 1; round <= totalRounds; round++) {
-            // Determine difficulty based on round
-            let difficulty = 'medium';
-            if (round <= 2) difficulty = 'easy';
-            else if (round >= 5) difficulty = 'hard';
+            // Check if game was cancelled
+            const gameState = activeGames.get(roomId);
+            if (!gameState || !gameState.active) {
+                console.log(`Game ${roomId} was cancelled, stopping`);
+                break;
+            }
+
+            // Update current round
+            gameState.currentRound = round;
             
-            console.log(`Generating phrase for round ${round} with difficulty: ${difficulty}`);
-            const phrase = await generatePhrase(difficulty);
+            console.log(`[Round ${round}/${totalRounds}] Starting for room ${roomId}`);
+            const phrase = generatePhrase();
 
             const embed = new EmbedBuilder()
                 .setColor('#ffd700')
@@ -166,84 +208,82 @@ async function playRounds(client, roomId, totalRounds) {
 
             await channel.send({ embeds: [embed] });
 
-            // Store the phrase for comparison
             const normalizedPhrase = phrase.toLowerCase().trim();
-            console.log(`Waiting for phrase: "${normalizedPhrase}"`);
+            console.log(`[Round ${round}] Waiting for: "${normalizedPhrase}"`);
+
+            let roundWinner = null;
+            let collectorEnded = false;
 
             const filter = m => {
                 const userMessage = m.content.toLowerCase().trim();
                 const isPlayer = room.players.includes(m.author.id);
                 const isMatch = userMessage === normalizedPhrase;
                 
-                console.log(`Message from ${m.author.tag}: "${userMessage}"`);
-                console.log(`Is player: ${isPlayer}, Is match: ${isMatch}`);
+                if (isMatch && isPlayer) {
+                    console.log(`[Round ${round}] Match from ${m.author.tag}: "${userMessage}"`);
+                }
                 
-                return isPlayer && isMatch;
+                return isPlayer && isMatch && !collectorEnded;
             };
             
-            const collector = channel.createMessageCollector({ filter, time: 120000, max: 1 });
+            const collector = channel.createMessageCollector({ 
+                filter, 
+                time: 120000, 
+                max: 1 
+            });
 
-            const roundResult = await new Promise(resolve => {
-                let resolved = false;
-
+            await new Promise(resolve => {
                 collector.on('collect', async message => {
-                    if (resolved) return;
-                    resolved = true;
-
-                    try {
-                        console.log(`Winner detected: ${message.author.tag}`);
-                        
-                        const economy = await github.getEconomy();
-                        const userId = message.author.id;
-
-                        if (!economy[userId]) {
-                            economy[userId] = { coins: 0, bucks: 0 };
-                        }
-
-                        const rewardCoins = rewards.typing_race_round?.coins || 50;
-                        economy[userId].coins += rewardCoins;
-                        
-                        await github.saveEconomy(economy);
-                        console.log(`Awarded ${rewardCoins} coins to ${message.author.tag}`);
-
-                        const winEmbed = new EmbedBuilder()
-                            .setColor('#00ff00')
-                            .setTitle('🏆 Round Winner!')
-                            .setDescription(`${message.author} won Round ${round}!`)
-                            .addFields({
-                                name: 'Reward',
-                                value: `🪙 ${rewardCoins} Coins`
-                            });
-
-                        await channel.send({ embeds: [winEmbed] });
-                        resolve(true);
-                    } catch (collectError) {
-                        console.error('Error processing round winner:', collectError);
-                        resolve(false);
+                    if (collectorEnded) {
+                        console.log(`[Round ${round}] Collector already ended, ignoring collect`);
+                        return;
                     }
+                    
+                    collectorEnded = true;
+                    roundWinner = message.author;
+
+                    console.log(`[Round ${round}] Winner: ${message.author.tag}`);
+
+                    const winEmbed = new EmbedBuilder()
+                        .setColor('#00ff00')
+                        .setTitle('🐐 GOAT ALERT!')
+                        .setDescription(`${message.author} is the GOAT! 🐐`)
+                        .setThumbnail(message.author.displayAvatarURL())
+                        .setTimestamp();
+
+                    await channel.send({ embeds: [winEmbed] });
+                    
+                    collector.stop('winner_found');
+                    resolve();
                 });
 
                 collector.on('end', (collected, reason) => {
-                    if (!resolved) {
-                        resolved = true;
-                        resolve(false);
+                    if (!collectorEnded) {
+                        collectorEnded = true;
+                        console.log(`[Round ${round}] Ended with reason: ${reason}`);
+                        
+                        if (reason === 'time' && !roundWinner) {
+                            channel.send({
+                                embeds: [new EmbedBuilder()
+                                    .setColor('#ff0000')
+                                    .setTitle('⏰ Time\'s Up!')
+                                    .setDescription(`No one completed Round ${round} in time!`)]
+                            }).catch(err => console.error('Error sending timeout message:', err));
+                        }
+                        
+                        resolve();
                     }
                 });
             });
 
-            if (!roundResult) {
-                const timeoutEmbed = new EmbedBuilder()
-                    .setColor('#ff0000')
-                    .setTitle('⏰ Time\'s Up!')
-                    .setDescription(`No one completed Round ${round} in time!`);
-
-                await channel.send({ embeds: [timeoutEmbed] });
-            }
-
+            // Wait between rounds
             if (round < totalRounds) {
                 await new Promise(resolve => setTimeout(resolve, 3000));
             }
         }
+
+        // Game completed
+        console.log(`[Game Complete] Room ${roomId} finished all rounds`);
 
         const finalEmbed = new EmbedBuilder()
             .setColor('#0099ff')
@@ -252,8 +292,10 @@ async function playRounds(client, roomId, totalRounds) {
 
         await channel.send({ embeds: [finalEmbed] });
 
-        delete activeRooms[roomId];
-        await github.saveActiveRooms(activeRooms);
+        // Clean up
+        const updatedRooms = await github.getActiveRooms();
+        delete updatedRooms[roomId];
+        await github.saveActiveRooms(updatedRooms);
 
         try {
             const message = await channel.messages.fetch(room.messageId);
@@ -264,6 +306,10 @@ async function playRounds(client, roomId, totalRounds) {
 
     } catch (error) {
         console.error('Error in typing race rounds:', error);
+    } finally {
+        // Always remove from active games when done
+        activeGames.delete(roomId);
+        console.log(`[Cleanup] Removed room ${roomId} from active games`);
     }
 }
 
