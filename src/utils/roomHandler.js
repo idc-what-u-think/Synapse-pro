@@ -5,7 +5,8 @@ const GAMES = {
     typing_race: { name: 'Typing Race', emoji: '⌨️', minPlayers: 2, maxPlayers: 10 },
     wyr: { name: 'Would You Rather', emoji: '🤔', minPlayers: 10, maxPlayers: 10 },
     reaction: { name: 'Fast Reaction', emoji: '⚡', minPlayers: 2, maxPlayers: 10 },
-    wordchain: { name: 'Word Chain', emoji: '🔗', minPlayers: 2, maxPlayers: 10 }
+    wordchain: { name: 'Word Chain', emoji: '🔗', minPlayers: 2, maxPlayers: 10 },
+    questions: { name: 'Questions', emoji: '📝', minPlayers: 2, maxPlayers: 10 }
 };
 
 async function updateRoomEmbed(client, roomId, room) {
@@ -34,8 +35,18 @@ async function updateRoomEmbed(client, roomId, room) {
                 { name: `👥 Players (${room.players.length}/${room.maxPlayers})`, value: playerList.join('\n') || 'No players', inline: false },
                 { name: '🔒 Password', value: room.password ? '✅ Protected' : '🔓 Open', inline: true },
                 { name: '📊 Status', value: room.status === 'waiting' ? '⏳ Waiting' : '▶️ In Progress', inline: true }
-            )
-            .setFooter({ text: `Room ID: ${roomId}` })
+            );
+        
+        // Add difficulty field for Questions game
+        if (room.gameId === 'questions' && room.difficulty) {
+            embed.addFields({
+                name: '⚙️ Difficulty',
+                value: room.difficulty.charAt(0).toUpperCase() + room.difficulty.slice(1),
+                inline: true
+            });
+        }
+        
+        embed.setFooter({ text: `Room ID: ${roomId}` })
             .setTimestamp();
 
         await message.edit({ embeds: [embed] });
@@ -537,10 +548,9 @@ async function handleStartGame(interaction, roomId) {
 
         await updateRoomEmbed(interaction.client, roomId, room);
 
-        // Defer the interaction update before starting the game
         await interaction.deferUpdate();
 
-        // Start the game and pass the interaction
+        // Start the game
         if (room.gameId === 'typing_race') {
             const typingRace = require('../games/typingrace');
             await typingRace.startGame(interaction.client, roomId, room, interaction);
@@ -553,12 +563,14 @@ async function handleStartGame(interaction, roomId) {
         } else if (room.gameId === 'wordchain') {
             const wordchain = require('../games/wordchain');
             await wordchain.startGame(interaction.client, roomId, room, interaction);
+        } else if (room.gameId === 'questions') {
+            const questions = require('../games/questions');
+            await questions.startGame(interaction.client, roomId, room, interaction);
         }
 
     } catch (error) {
         console.error('Error starting game:', error);
         
-        // Only try to reply if we haven't acknowledged the interaction yet
         try {
             if (!interaction.replied && !interaction.deferred) {
                 await interaction.reply({
