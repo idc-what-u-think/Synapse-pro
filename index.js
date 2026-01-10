@@ -88,9 +88,41 @@ const startHealthServer = () => {
     });
 };
 
+// ============================================
+// NEW: 24-HOUR GITHUB SYNC SCHEDULER
+// ============================================
+function startGitHubSyncScheduler() {
+    const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+    
+    console.log('🔄 Starting 24-hour GitHub sync scheduler...');
+    
+    // Sync every 24 hours
+    const syncInterval = setInterval(async () => {
+        console.log('\n⏰ 24-hour sync interval triggered');
+        try {
+            const stats = github.getCacheStats();
+            console.log(`📊 Cache stats before sync:`, stats);
+            
+            const success = await github.syncCacheToGitHub();
+            if (success) {
+                console.log('✅ Scheduled 24-hour sync completed successfully');
+            } else {
+                console.log('⚠️  Scheduled 24-hour sync completed with some errors');
+            }
+        } catch (error) {
+            console.error('❌ Scheduled 24-hour sync failed:', error);
+        }
+    }, TWENTY_FOUR_HOURS);
+    
+    console.log('✅ GitHub sync scheduler started (runs every 24 hours)');
+    
+    // Return the interval so it can be cleared if needed
+    return syncInterval;
+}
+
 async function checkReminders() {
     try {
-        const data = await github.getData('data/reminders.json');
+        const data = await github.getData('reminders');
         if (!data || !Array.isArray(data.reminders) || data.reminders.length === 0) {
             return;
         }
@@ -120,7 +152,7 @@ async function checkReminders() {
         }
 
         data.reminders = data.reminders.filter(r => r.reminderTime > now);
-        await github.saveData('data/reminders.json', data, 'Processed reminders');
+        await github.saveData('reminders', data, 'Processed reminders');
 
     } catch (error) {
         console.error('Error checking reminders:', error);
@@ -212,6 +244,11 @@ async function initialize() {
             console.error('GitHub setup required - check your token permissions');
             process.exit(1);
         }
+        
+        // Load cache from GitHub on startup
+        console.log('\n🚀 Loading data cache from GitHub...');
+        await github.loadCacheFromGitHub();
+        console.log('✅ Cache loaded and ready!\n');
         
         if (database && typeof database === 'object') {
             console.log('Database module loaded');
@@ -519,13 +556,13 @@ client.once('ready', async () => {
     startHealthServer();
     startSelfPing();
     
+    // Start the 24-hour GitHub sync scheduler
+    startGitHubSyncScheduler();
+    
     setInterval(() => checkReminders(), 60000);
     console.log('Reminder checker started (every 60 seconds)');
 });
 
-// ============================================
-// NEW: AUTO-LEAVE NON-WHITELISTED SERVERS
-// ============================================
 client.on('guildCreate', async (guild) => {
     console.log(`[GUILD JOIN] Bot added to: ${guild.name} (${guild.id})`);
 
@@ -534,7 +571,7 @@ client.on('guildCreate', async (guild) => {
         let whitelist = [];
         
         try {
-            const data = await getData('whitelist.json');
+            const data = await getData('whitelist');
             whitelist = data.servers || [];
         } catch (error) {
             whitelist = [];
@@ -543,7 +580,6 @@ client.on('guildCreate', async (guild) => {
         if (!whitelist.includes(guild.id)) {
             console.log(`[AUTO-LEAVE] Unauthorized server detected: ${guild.name} (${guild.id})`);
 
-            // Notify bot owner
             const ownerId = process.env.OWNER_ID;
             if (ownerId) {
                 try {
@@ -567,7 +603,6 @@ client.on('guildCreate', async (guild) => {
                 }
             }
 
-            // Try to DM the server owner
             try {
                 const owner = await guild.fetchOwner();
                 await owner.send({
@@ -582,7 +617,6 @@ client.on('guildCreate', async (guild) => {
                 console.log(`[AUTO-LEAVE] Could not DM owner of ${guild.name}`);
             }
 
-            // Leave the server
             await guild.leave();
             console.log(`[AUTO-LEAVE] Left unauthorized server: ${guild.name}`);
         } else {
@@ -590,7 +624,6 @@ client.on('guildCreate', async (guild) => {
         }
     } catch (error) {
         console.error('[AUTO-LEAVE] Error processing guild join:', error);
-        // If there's an error checking whitelist, leave to be safe
         await guild.leave();
     }
 });
@@ -633,8 +666,20 @@ process.on('unhandledRejection', error => {
     console.error('Promise rejection:', error);
 });
 
-process.on('SIGINT', () => {
-    console.log('Shutting down...');
+// ============================================
+// SYNC CACHE TO GITHUB ON SHUTDOWN
+// ============================================
+process.on('SIGINT', async () => {
+    console.log('\n🛑 Shutting down...');
+    console.log('💾 Syncing cache to GitHub before shutdown...');
+    
+    try {
+        await github.forceSyncToGitHub();
+        console.log('✅ Final sync completed!');
+    } catch (error) {
+        console.error('❌ Failed to sync on shutdown:', error);
+    }
+    
     client.destroy();
     process.exit(0);
 });
