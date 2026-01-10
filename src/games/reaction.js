@@ -1,45 +1,34 @@
 const { EmbedBuilder } = require('discord.js');
 const github = require('../utils/github');
-const { getAIInstance, GEMINI_KEYS } = require('../events/messageCreate');
 
 const EMOJIS = [
     '🎯', '⚡', '🔥', '💎', '⭐', '🎮', '🏆', '💯', '✨', '🌟',
     '🚀', '🎨', '🎭', '🎪', '🎬', '🎤', '🎧', '🎼', '🎹', '🥁',
-    '🎺', '🎸', '🎻', '🎲', '🎰', '🎳', '🏀', '⚽', '🏈', '⚾'
+    '🎺', '🎸', '🎻', '🎲', '🎰', '🎳', '🏀', '⚽', '🏈', '⚾',
+    '🏐', '🏉', '🎾', '🏸', '🏓', '🏒', '🏑', '🥊', '🥋', '⛳',
+    '🎣', '🎿', '🛷', '⛸️', '🥌', '🏹', '🎯', '🪁', '🤿', '🪂',
+    '🏋️', '🤸', '🤾', '⛹️', '🤺', '🧗', '🚴', '🚵', '🏇', '🧘',
+    '🎖️', '🏅', '🥇', '🥈', '🥉', '👑', '💍', '💰', '💵', '💴',
+    '💶', '💷', '💸', '🪙', '💳', '🧧', '🎁', '🎀', '🎊', '🎉',
+    '🎈', '🎏', '🎐', '🧨', '✨', '🎇', '🎆', '🌠', '🌌', '🌃',
+    '🌆', '🌇', '🌉', '🌁', '⚓', '⛵', '🚤', '🛳️', '⛴️', '🛥️',
+    '🚢', '✈️', '🛩️', '🛫', '🛬', '🪂', '💺', '🚁', '🚟', '🚠',
+    '🚡', '🛰️', '🚀', '🛸', '🌍', '🌎', '🌏', '🗺️', '🧭', '🏔️'
 ];
 
-// Fallback prompts if AI fails
-const FALLBACK_PROMPTS = [
-    'React with the emoji that represents speed!',
-    'Click on the emoji that symbolizes victory!',
-    'Find the emoji that means celebration!',
-    'React with the gaming emoji!',
-    'Choose the emoji that represents a champion!'
+// Challenge prompts
+const CHALLENGE_PROMPTS = [
+    'React with {emoji} to win!',
+    'Quick! Hit {emoji} first!',
+    'Be the fastest to click {emoji}!',
+    'Find and react with {emoji}!',
+    'React {emoji} before everyone else!',
+    'Catch the {emoji} now!',
+    'First to {emoji} wins!',
+    'Speed reaction! Click {emoji}!',
+    'React {emoji} to claim victory!',
+    'Who can hit {emoji} first?'
 ];
-
-async function generateChallenge(emoji) {
-    try {
-        if (GEMINI_KEYS.length === 0) {
-            console.log('No AI keys available, using fallback prompt');
-            return FALLBACK_PROMPTS[Math.floor(Math.random() * FALLBACK_PROMPTS.length)];
-        }
-
-        const aiInstance = getAIInstance();
-        
-        const prompt = `Generate a very short, exciting challenge prompt (5-10 words) asking users to react with the ${emoji} emoji. Make it fun and engaging. Examples: "Quick! React with ${emoji} to win!", "Be the fastest to hit ${emoji}!", "Catch the ${emoji} before it's gone!". Just return the prompt, nothing else.`;
-
-        const result = await aiInstance.model.generateContent(prompt);
-        const challenge = result.response.text().trim().replace(/["""]/g, '');
-        
-        console.log(`AI generated challenge: ${challenge}`);
-        return challenge;
-        
-    } catch (error) {
-        console.error('Error generating AI challenge:', error);
-        console.log('Using fallback prompt due to error');
-        return FALLBACK_PROMPTS[Math.floor(Math.random() * FALLBACK_PROMPTS.length)];
-    }
-}
 
 async function startGame(client, roomId, room, interaction) {
     try {
@@ -83,38 +72,63 @@ async function playGame(client, roomId, room) {
             await github.saveGameRewards(rewards);
         }
         
-        // Generate AI challenge prompt
-        const challengeText = await generateChallenge(targetEmoji);
+        // Get random challenge prompt
+        const promptTemplate = CHALLENGE_PROMPTS[Math.floor(Math.random() * CHALLENGE_PROMPTS.length)];
+        const challengeText = promptTemplate.replace('{emoji}', targetEmoji);
         
         const embed = new EmbedBuilder()
             .setColor('#ff6600')
             .setTitle('⚡ Fast Reaction Challenge!')
-            .setDescription(`${challengeText}\n\n**React with:** ${targetEmoji}`)
+            .setDescription(`${challengeText}\n\n**Target Emoji:** ${targetEmoji}`)
             .setFooter({ text: 'First person to react wins!' });
             
         const message = await channel.send({ embeds: [embed] });
         
-        // Don't add bot reaction - let players react first!
+        // Add the target emoji so users can click it
+        await message.react(targetEmoji);
         
         const filter = (reaction, user) => {
-            if (!reaction || !reaction.emoji) return false;
+            if (!reaction || !reaction.emoji) {
+                console.log('No reaction or emoji');
+                return false;
+            }
+            
             const isCorrectEmoji = reaction.emoji.name === targetEmoji;
             const isPlayer = room.players.includes(user.id);
             const notBot = !user.bot;
             
-            console.log(`Reaction from ${user.tag}: ${reaction.emoji.name}, Correct: ${isCorrectEmoji}, Player: ${isPlayer}, Not Bot: ${notBot}`);
+            console.log(`[Reaction Debug]`);
+            console.log(`  User: ${user.tag} (${user.id})`);
+            console.log(`  Emoji: ${reaction.emoji.name}`);
+            console.log(`  Target: ${targetEmoji}`);
+            console.log(`  Is Correct: ${isCorrectEmoji}`);
+            console.log(`  Is Player: ${isPlayer}`);
+            console.log(`  Not Bot: ${notBot}`);
+            console.log(`  All Valid: ${isCorrectEmoji && isPlayer && notBot}`);
             
             return isCorrectEmoji && isPlayer && notBot;
         };
         
-        const collector = message.createReactionCollector({ filter, time: 60000, max: 1 });
+        const collector = message.createReactionCollector({ 
+            filter, 
+            time: 60000, 
+            max: 1 
+        });
+        
         let gameEnded = false;
         
         collector.on('collect', async (reaction, user) => {
-            if (gameEnded) return;
+            console.log(`[WINNER DETECTED] ${user.tag} reacted with ${reaction.emoji.name}`);
+            
+            if (gameEnded) {
+                console.log('Game already ended, ignoring');
+                return;
+            }
             gameEnded = true;
             
             try {
+                console.log('Processing winner rewards...');
+                
                 const economy = await github.getEconomy();
                 const userId = user.id;
                 
@@ -130,42 +144,61 @@ async function playGame(client, roomId, room) {
                 
                 await github.saveEconomy(economy);
                 
+                console.log(`Awarded ${rewardCoins} coins and ${rewardBucks} bucks to ${user.tag}`);
+                
                 const winEmbed = new EmbedBuilder()
                     .setColor('#00ff00')
-                    .setTitle('🏆 Winner!')
-                    .setDescription(`${user} reacted first and wins!`)
+                    .setTitle('🐐 GOAT ALERT!')
+                    .setDescription(`${user} is the GOAT! 🐐\n\nFastest reaction in the server!`)
                     .addFields({
-                        name: 'Rewards',
-                        value: `🪙 ${rewardCoins} Coins\n💵 ${rewardBucks} Buck${rewardBucks !== 1 ? 's' : ''}`
-                    });
+                        name: '💰 Rewards Earned',
+                        value: `🪙 **${rewardCoins}** Coins\n💵 **${rewardBucks}** Buck${rewardBucks !== 1 ? 's' : ''}`,
+                        inline: false
+                    })
+                    .setThumbnail(user.displayAvatarURL())
+                    .setTimestamp();
                     
                 await channel.send({ embeds: [winEmbed] });
                 
+                console.log('Winner announcement sent');
+                
+                // Stop collector immediately
+                collector.stop('winner_found');
+                
             } catch (error) {
                 console.error('Error processing reaction winner:', error);
+                gameEnded = false; // Reset if there was an error
             }
         });
         
         collector.on('end', async (collected, reason) => {
-            if (!gameEnded) {
+            console.log(`[Collector Ended] Reason: ${reason}, Collected: ${collected.size}`);
+            
+            if (reason === 'winner_found') {
+                console.log('Game ended with winner');
+            } else if (!gameEnded) {
+                console.log('Game ended without winner (timeout)');
+                
                 const timeoutEmbed = new EmbedBuilder()
                     .setColor('#ff0000')
                     .setTitle('⏰ Time\'s Up!')
-                    .setDescription('No one reacted in time!');
+                    .setDescription('No one reacted in time! Better luck next time!');
                     
                 await channel.send({ embeds: [timeoutEmbed] });
             }
             
             // Clean up room
-            const activeRooms = await github.getActiveRooms();
-            delete activeRooms[roomId];
-            await github.saveActiveRooms(activeRooms);
-            
             try {
+                console.log('Cleaning up room...');
+                const activeRooms = await github.getActiveRooms();
+                delete activeRooms[roomId];
+                await github.saveActiveRooms(activeRooms);
+                
                 const roomMessage = await channel.messages.fetch(room.messageId);
                 await roomMessage.delete();
+                console.log('Room cleaned up successfully');
             } catch (deleteError) {
-                console.error('Error deleting room message:', deleteError);
+                console.error('Error cleaning up room:', deleteError);
             }
         });
         
