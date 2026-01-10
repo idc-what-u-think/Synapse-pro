@@ -1,8 +1,18 @@
-const fs = require('fs').promises;
-const path = require('path');
+const { Octokit } = require('@octokit/rest');
 
-// Base data directory
-const DATA_DIR = path.join(__dirname, '..', 'data');
+const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+const owner = process.env.GITHUB_OWNER;
+const repo = process.env.GITHUB_REPO;
+
+// ============================================
+// IN-MEMORY CACHE SYSTEM
+// ============================================
+const dataCache = {
+    loaded: false,
+    lastSync: null,
+    data: {},
+    pendingChanges: new Set() // Track which files have changes
+};
 
 const FILE_PATHS = {
     config: 'data/config.json',
@@ -23,6 +33,7 @@ const FILE_PATHS = {
     referral_tracking: 'data/referrals/tracking.json',
     setup_cooldowns: 'data/setup/cooldowns.json',
     whitelist: 'data/whitelist.json',
+    reminders: 'data/reminders.json',
     
     // Sensitivity Generator Data
     sensi_users: 'data/sensitivity/users.json',
@@ -34,103 +45,318 @@ const FILE_PATHS = {
     sensi_broadcast_history: 'data/sensitivity/broadcast_history.json',
 };
 
-// Ensure directory exists
-async function ensureDirectory(dirPath) {
-    try {
-        await fs.mkdir(dirPath, { recursive: true });
-    } catch (error) {
-        if (error.code !== 'EEXIST') {
-            throw error;
-        }
-    }
-}
+// ============================================
+// CORE CACHE FUNCTIONS
+// ============================================
 
-// Initialize data directory structure
-async function initializeDataDirectory() {
+/**
+ * Load all data from GitHub into memory cache
+ */
+async function loadCacheFromGitHub() {
+    console.log('📥 Loading data from GitHub into cache...');
+    
     try {
-        await ensureDirectory(DATA_DIR);
+        await initializeRepo(octokit, owner, repo);
         
-        const directories = [
-            'moderation',
-            'leveling',
-            'features',
-            'giveaways',
-            'economy',
-            'games',
-            'referrals',
-            'setup',
-            'sensitivity'
-        ];
-        
-        for (const dir of directories) {
-            await ensureDirectory(path.join(DATA_DIR, dir));
+        for (const [key, path] of Object.entries(FILE_PATHS)) {
+            try {
+                const response = await octokit.rest.repos.getContent({
+                    owner,
+                    repo,
+                    path,
+                });
+                
+                const data = JSON.parse(Buffer.from(response.data.content, 'base64').toString());
+                dataCache.data[key] = data;
+                console.log(`  ✅ Loaded: ${key}`);
+            } catch (error) {
+                if (error.status === 404) {
+                    dataCache.data[key] = {};
+                    console.log(`  ⚠️  Not found (using empty): ${key}`);
+                } else {
+                    throw error;
+                }
+            }
         }
+        
+        dataCache.loaded = true;
+        dataCache.lastSync = Date.now();
+        dataCache.pendingChanges.clear();
+        
+        console.log('✅ Cache loaded successfully!');
+        console.log(`📊 Loaded ${Object.keys(dataCache.data).length} data files`);
         
         return true;
     } catch (error) {
-        console.error('Error initializing data directory:', error);
-        return false;
-    }
-}
-
-// Get data from local file
-async function getData(pathOrKey) {
-    try {
-        if (!pathOrKey) {
-            throw new Error('Path parameter is required');
-        }
-        
-        await initializeDataDirectory();
-        
-        const filePath = FILE_PATHS[pathOrKey] || pathOrKey;
-        const fullPath = path.join(__dirname, '..', filePath);
-        
-        const fileContent = await fs.readFile(fullPath, 'utf8');
-        return JSON.parse(fileContent);
-    } catch (error) {
-        if (error.code === 'ENOENT') {
-            return {};
-        }
-        console.error(`Error getting data from ${pathOrKey}:`, error.message);
+        console.error('❌ Failed to load cache from GitHub:', error);
         throw error;
     }
 }
 
-// Save data to local file
-async function saveData(pathOrKey, content, message = 'Update data', maxRetries = 3) {
+/**
+ * Sync all pending changes to GitHub in one commit
+ */
+async function syncCacheToGitHub(forcedSync = false) {
+    if (!dataCache.loaded) {
+        console.log('⚠️  Cache not loaded, skipping sync');
+        return false;
+    }
+    
+    if (dataCache.pendingChanges.size === 0 && !forcedSync) {
+        console.log('ℹ️  No pending changes to sync');
+        return true;
+    }
+    
+    const syncType = forcedSync ? 'Forced sync' : 'Scheduled sync';
+    console.log(`📤 ${syncType}: Syncing ${dataCache.pendingChanges.size} changed files to GitHub...`);
+    
+    try {
+        await initializeRepo(octokit, owner, repo);
+        
+        const changedFiles = forcedSync 
+            ? Object.keys(dataCache.data) 
+            : Array.from(dataCache.pendingChanges);
+        
+        let successCount = 0;
+        let errorCount = 0;
+        
+        for (const key of changedFiles) {
+            try {
+                const path = FILE_PATHS[key];
+                const content = dataCache.data[key];
+                
+                await saveDataDirectToGitHub(path, content, `Batch sync: ${key}`);
+                successCount++;
+                console.log(`  ✅ Synced: ${key}`);
+            } catch (error) {
+                errorCount++;
+                console.error(`  ❌ Failed to sync ${key}:`, error.message);
+            }
+        }
+        
+        dataCache.lastSync = Date.now();
+        dataCache.pendingChanges.clear();
+        
+        console.log(`✅ Sync complete! Success: ${successCount}, Errors: ${errorCount}`);
+        console.log(`🕒 Next sync in 24 hours`);
+        
+        return errorCount === 0;
+    } catch (error) {
+        console.error('❌ Failed to sync cache to GitHub:', error);
+        return false;
+    }
+}
+
+/**
+ * Get data from cache (instant, no GitHub API call)
+ */
+async function getData(pathOrKey) {
+    if (!dataCache.loaded) {
+        console.log('⚠️  Cache not loaded yet, loading now...');
+        await loadCacheFromGitHub();
+    }
+    
+    const key = Object.keys(FILE_PATHS).find(k => FILE_PATHS[k] === pathOrKey) || pathOrKey;
+    
+    if (dataCache.data[key]) {
+        return dataCache.data[key];
+    }
+    
+    // If not in cache, return empty object
+    return {};
+}
+
+/**
+ * Save data to cache (instant, no GitHub API call)
+ * Changes will be synced to GitHub on next scheduled sync
+ */
+async function saveData(pathOrKey, content, message = 'Update data') {
+    if (!dataCache.loaded) {
+        console.log('⚠️  Cache not loaded yet, loading now...');
+        await loadCacheFromGitHub();
+    }
+    
+    const key = Object.keys(FILE_PATHS).find(k => FILE_PATHS[k] === pathOrKey) || pathOrKey;
+    
+    // Save to cache
+    dataCache.data[key] = content;
+    
+    // Mark as pending change
+    dataCache.pendingChanges.add(key);
+    
+    return { success: true, cached: true, key };
+}
+
+/**
+ * Force immediate sync to GitHub (for critical operations)
+ */
+async function forceSyncToGitHub() {
+    return await syncCacheToGitHub(true);
+}
+
+/**
+ * Direct save to GitHub (bypasses cache, used internally by sync)
+ */
+async function saveDataDirectToGitHub(path, content, message = 'Update data', maxRetries = 3) {
     let attempt = 0;
     
     while (attempt < maxRetries) {
         try {
-            await initializeDataDirectory();
+            await initializeRepo(octokit, owner, repo);
             
-            const filePath = FILE_PATHS[pathOrKey] || pathOrKey;
-            const fullPath = path.join(__dirname, '..', filePath);
+            const pathParts = path.split('/');
+            if (pathParts.length > 1) {
+                for (let i = 1; i < pathParts.length; i++) {
+                    const dirPath = pathParts.slice(0, i).join('/');
+                    if (dirPath) {
+                        await ensureDirectory(dirPath);
+                    }
+                }
+            }
             
-            // Ensure parent directory exists
-            const parentDir = path.dirname(fullPath);
-            await ensureDirectory(parentDir);
+            let sha;
+            try {
+                const existing = await octokit.rest.repos.getContent({
+                    owner,
+                    repo,
+                    path,
+                });
+                sha = existing.data.sha;
+            } catch (error) {
+                if (error.status !== 404) {
+                    throw error;
+                }
+            }
+
+            const params = {
+                owner,
+                repo,
+                path,
+                message: message || `Update ${path}`,
+                content: Buffer.from(JSON.stringify(content, null, 2)).toString('base64'),
+            };
             
-            // Write file
-            await fs.writeFile(fullPath, JSON.stringify(content, null, 2), 'utf8');
-            
-            return { success: true };
+            if (sha) params.sha = sha;
+
+            const result = await octokit.rest.repos.createOrUpdateFileContents(params);
+            return result;
             
         } catch (error) {
-            if (attempt < maxRetries - 1) {
+            if (error.status === 409 && attempt < maxRetries - 1) {
                 attempt++;
                 await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
                 continue;
             }
             
-            console.error(`Error saving data to ${pathOrKey}:`, error.message);
+            console.error(`Error saving data to ${path}:`, error.message);
             throw error;
         }
     }
 }
 
+/**
+ * Get cache statistics
+ */
+function getCacheStats() {
+    return {
+        loaded: dataCache.loaded,
+        lastSync: dataCache.lastSync ? new Date(dataCache.lastSync).toISOString() : 'Never',
+        timeSinceLastSync: dataCache.lastSync ? Date.now() - dataCache.lastSync : null,
+        pendingChanges: dataCache.pendingChanges.size,
+        totalFiles: Object.keys(dataCache.data).length,
+        changedFiles: Array.from(dataCache.pendingChanges)
+    };
+}
+
 // ============================================
-// EXISTING FUNCTIONS (kept as-is)
+// HELPER FUNCTIONS
+// ============================================
+
+async function initializeRepo(octokit, owner, repo) {
+    try {
+        await octokit.rest.repos.get({ owner, repo });
+        return true;
+    } catch (error) {
+        if (error.status === 404) {
+            const newRepo = await octokit.rest.repos.createForAuthenticatedUser({
+                name: repo,
+                auto_init: true,
+                private: true,
+                description: 'Discord bot data storage'
+            });
+            return newRepo;
+        } else {
+            throw error;
+        }
+    }
+}
+
+async function ensureDirectory(dirPath) {
+    try {
+        await octokit.rest.repos.getContent({
+            owner,
+            repo,
+            path: dirPath
+        });
+    } catch (error) {
+        if (error.status === 404) {
+            try {
+                await octokit.rest.repos.createOrUpdateFileContents({
+                    owner,
+                    repo,
+                    path: `${dirPath}/.gitkeep`,
+                    message: `Create directory: ${dirPath}`,
+                    content: Buffer.from('').toString('base64')
+                });
+            } catch (createError) {
+                if (createError.status !== 422) {
+                    throw createError;
+                }
+            }
+        }
+    }
+}
+
+async function testPermissions() {
+    try {
+        const { data: tokenData } = await octokit.rest.users.getAuthenticated();
+        const { data: repoData } = await octokit.rest.repos.get({ owner, repo });
+
+        const testFilePath = '.github/test-write-access';
+        try {
+            await octokit.rest.repos.createOrUpdateFileContents({
+                owner,
+                repo,
+                path: testFilePath,
+                message: 'Test write access',
+                content: Buffer.from('test').toString('base64'),
+            });
+            
+            const { data: fileData } = await octokit.rest.repos.getContent({
+                owner,
+                repo,
+                path: testFilePath,
+            });
+            await octokit.rest.repos.deleteFile({
+                owner,
+                repo,
+                path: testFilePath,
+                message: 'Remove test write access file',
+                sha: fileData.sha,
+            });
+            return true;
+        } catch (writeError) {
+            console.error('Write permission test failed:', writeError.message);
+            return false;
+        }
+    } catch (error) {
+        console.error('Permission test failed:', error.message);
+        return false;
+    }
+}
+
+// ============================================
+// WRAPPER FUNCTIONS (All use cache now)
 // ============================================
 
 async function getConfig() {
@@ -279,7 +505,6 @@ async function saveSetupCooldowns(cooldowns, message = 'Update setup cooldowns')
 // SENSITIVITY GENERATOR FUNCTIONS
 // ============================================
 
-// Users Management
 async function getSensiUsers() {
     const data = await getData('sensi_users');
     return data || { users: {} };
@@ -385,7 +610,6 @@ async function unbanUser(userId) {
     return data.users[userId];
 }
 
-// Generation Logs
 async function getSensiGenerations() {
     const data = await getData('sensi_generations');
     return data || { logs: [] };
@@ -428,7 +652,6 @@ async function getGenerationsToday() {
     return data.logs.filter(log => log.generatedAt.startsWith(today));
 }
 
-// Server Management
 async function getSensiServers() {
     const data = await getData('sensi_servers');
     return data || { servers: {} };
@@ -523,7 +746,6 @@ async function unblacklistServer(serverId) {
     return data.servers[serverId];
 }
 
-// Bot Configuration
 async function getSensiConfig() {
     const data = await getData('sensi_config');
     return data || {
@@ -548,7 +770,6 @@ async function saveSensiConfig(config, message = 'Update sensitivity config') {
     return await saveData('sensi_config', config, message);
 }
 
-// API Keys
 async function getSensiApiKeys() {
     const data = await getData('sensi_api_keys');
     return data || { keys: [] };
@@ -560,7 +781,6 @@ async function saveSensiApiKeys(keys, message = 'Update API keys') {
 
 async function createApiKey(name, createdBy) {
     const data = await getSensiApiKeys();
-    const crypto = require('crypto');
     const keyValue = `sk_${crypto.randomUUID().replace(/-/g, '')}`;
     
     data.keys.push({
@@ -587,7 +807,6 @@ async function deleteApiKey(keyId) {
     return true;
 }
 
-// Broadcast History
 async function getSensiBroadcastHistory() {
     const data = await getData('sensi_broadcast_history');
     return data || { broadcasts: [] };
@@ -608,7 +827,6 @@ async function addBroadcast(broadcastData) {
     return data.broadcasts[data.broadcasts.length - 1];
 }
 
-// Statistics & Analytics
 async function getSensiStats() {
     const users = await getSensiUsers();
     const generations = await getSensiGenerations();
@@ -674,24 +892,13 @@ function getDailyGenerations(logs, days = 7) {
         .reverse();
 }
 
-// Test Permissions (now just checks if we can write locally)
-async function testPermissions() {
-    try {
-        await initializeDataDirectory();
-        const testPath = path.join(DATA_DIR, 'test-write-access.json');
-        
-        await fs.writeFile(testPath, JSON.stringify({ test: true }), 'utf8');
-        await fs.readFile(testPath, 'utf8');
-        await fs.unlink(testPath);
-        
-        return true;
-    } catch (error) {
-        console.error('Permission test failed:', error.message);
-        return false;
-    }
-}
-
 module.exports = {
+    // Cache management
+    loadCacheFromGitHub,
+    syncCacheToGitHub,
+    forceSyncToGitHub,
+    getCacheStats,
+    
     // Core functions
     getData,
     saveData,
@@ -730,7 +937,6 @@ module.exports = {
     saveSetupCooldowns,
     
     // Sensitivity Generator Functions
-    // Users
     getSensiUsers,
     saveSensiUsers,
     getSensiUser,
@@ -740,16 +946,12 @@ module.exports = {
     revokeVIP,
     banUser,
     unbanUser,
-    
-    // Generations
     getSensiGenerations,
     saveSensiGenerations,
     addGenerationLog,
     getGenerationsByUser,
     getGenerationsByGame,
     getGenerationsToday,
-    
-    // Servers
     getSensiServers,
     saveSensiServers,
     updateServerInfo,
@@ -757,23 +959,15 @@ module.exports = {
     revokeServerVIP,
     blacklistServer,
     unblacklistServer,
-    
-    // Config
     getSensiConfig,
     saveSensiConfig,
-    
-    // API Keys
     getSensiApiKeys,
     saveSensiApiKeys,
     createApiKey,
     deleteApiKey,
-    
-    // Broadcast
     getSensiBroadcastHistory,
     saveSensiBroadcastHistory,
     addBroadcast,
-    
-    // Stats
     getSensiStats,
     
     FILE_PATHS
