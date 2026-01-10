@@ -88,15 +88,11 @@ const startHealthServer = () => {
     });
 };
 
-// ============================================
-// NEW: 24-HOUR GITHUB SYNC SCHEDULER
-// ============================================
 function startGitHubSyncScheduler() {
-    const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+    const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
     
     console.log('🔄 Starting 24-hour GitHub sync scheduler...');
     
-    // Sync every 24 hours
     const syncInterval = setInterval(async () => {
         console.log('\n⏰ 24-hour sync interval triggered');
         try {
@@ -116,7 +112,6 @@ function startGitHubSyncScheduler() {
     
     console.log('✅ GitHub sync scheduler started (runs every 24 hours)');
     
-    // Return the interval so it can be cleared if needed
     return syncInterval;
 }
 
@@ -245,7 +240,6 @@ async function initialize() {
             process.exit(1);
         }
         
-        // Load cache from GitHub on startup
         console.log('\n🚀 Loading data cache from GitHub...');
         await github.loadCacheFromGitHub();
         console.log('✅ Cache loaded and ready!\n');
@@ -422,6 +416,21 @@ client.on('interactionCreate', async interaction => {
                 const roomId = customId.replace('room_start_', '');
                 await roomHandler.handleStartGame(interaction, roomId);
             }
+            
+            // ============================================
+            // UPDATED: Questions Game Password Handlers
+            // ============================================
+            else if (customId.startsWith('room_add_password_questions_')) {
+                const difficulty = customId.replace('room_add_password_questions_', '');
+                const useCommand = require('./src/commands/use');
+                await useCommand.handlePasswordButton(interaction, `questions_${difficulty}`, true);
+            }
+            else if (customId.startsWith('room_no_password_questions_')) {
+                const difficulty = customId.replace('room_no_password_questions_', '');
+                const useCommand = require('./src/commands/use');
+                await useCommand.handlePasswordButton(interaction, `questions_${difficulty}`, false);
+            }
+            // Other games password handlers
             else if (customId.startsWith('room_add_password_')) {
                 const gameId = customId.replace('room_add_password_', '');
                 const useCommand = require('./src/commands/use');
@@ -469,6 +478,13 @@ client.on('interactionCreate', async interaction => {
             else if (customId === 'select_game') {
                 const useCommand = require('./src/commands/use');
                 await useCommand.handleGameSelection(interaction);
+            }
+            // ============================================
+            // NEW: Questions Game Difficulty Selection
+            // ============================================
+            else if (customId === 'select_difficulty_questions') {
+                const useCommand = require('./src/commands/use');
+                await useCommand.handleDifficultySelection(interaction);
             }
             else {
                 console.log(`Unhandled select menu: ${customId}`);
@@ -555,8 +571,6 @@ client.once('ready', async () => {
     
     startHealthServer();
     startSelfPing();
-    
-    // Start the 24-hour GitHub sync scheduler
     startGitHubSyncScheduler();
     
     setInterval(() => checkReminders(), 60000);
@@ -666,9 +680,6 @@ process.on('unhandledRejection', error => {
     console.error('Promise rejection:', error);
 });
 
-// ============================================
-// SYNC CACHE TO GITHUB ON SHUTDOWN
-// ============================================
 process.on('SIGINT', async () => {
     console.log('\n🛑 Shutting down...');
     console.log('💾 Syncing cache to GitHub before shutdown...');
