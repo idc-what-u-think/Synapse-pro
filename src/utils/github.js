@@ -122,8 +122,13 @@ async function syncCacheToGitHub(forcedSync = false) {
         
         for (const key of changedFiles) {
             try {
-                const path = FILE_PATHS[key];
+                const path = FILE_PATHS[key] || key; // Use key as path if not in FILE_PATHS
                 const content = dataCache.data[key];
+                
+                if (!path) {
+                    console.log(`  ⚠️  Skipped: ${key} (no path mapping)`);
+                    continue;
+                }
                 
                 await saveDataDirectToGitHub(path, content, `Batch sync: ${key}`);
                 successCount++;
@@ -156,10 +161,32 @@ async function getData(pathOrKey) {
         await loadCacheFromGitHub();
     }
     
+    // Check if it's a predefined key
     const key = Object.keys(FILE_PATHS).find(k => FILE_PATHS[k] === pathOrKey) || pathOrKey;
     
     if (dataCache.data[key]) {
         return dataCache.data[key];
+    }
+    
+    // If not in cache and it's a full path (not a predefined key), try to load it from GitHub
+    if (pathOrKey.includes('/') || pathOrKey.includes('.json')) {
+        try {
+            const response = await octokit.rest.repos.getContent({
+                owner,
+                repo,
+                path: pathOrKey,
+            });
+            
+            const data = JSON.parse(Buffer.from(response.data.content, 'base64').toString());
+            // Cache it for future use
+            dataCache.data[pathOrKey] = data;
+            return data;
+        } catch (error) {
+            if (error.status === 404) {
+                return {};
+            }
+            throw error;
+        }
     }
     
     // If not in cache, return empty object
@@ -176,6 +203,7 @@ async function saveData(pathOrKey, content, message = 'Update data') {
         await loadCacheFromGitHub();
     }
     
+    // Check if it's a predefined key
     const key = Object.keys(FILE_PATHS).find(k => FILE_PATHS[k] === pathOrKey) || pathOrKey;
     
     // Save to cache
