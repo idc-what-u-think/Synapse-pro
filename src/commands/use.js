@@ -5,7 +5,16 @@ const GAMES = {
     typing_race: { name: 'Typing Race', emoji: '⌨️', description: 'Type the phrase as fast as you can!' },
     wyr: { name: 'Would You Rather', emoji: '🤔', description: 'Vote and survive to win!' },
     reaction: { name: 'Fast Reaction', emoji: '⚡', description: 'React with the correct emoji!' },
-    wordchain: { name: 'Word Chain', emoji: '🔗', description: 'Chain words together using last letters!' }
+    wordchain: { name: 'Word Chain', emoji: '🔗', description: 'Chain words together using last letters!' },
+    questions: { name: 'Questions', emoji: '📝', description: 'Answer trivia questions - first to 10 wins!' }
+};
+
+const DIFFICULTIES = {
+    easy: { name: 'Easy', emoji: '🟢', description: 'Basic questions everyone knows' },
+    normal: { name: 'Normal', emoji: '🔵', description: 'Moderate general knowledge' },
+    hard: { name: 'Hard', emoji: '🟠', description: 'Challenging trivia' },
+    difficult: { name: 'Difficult', emoji: '🔴', description: 'Very tough questions' },
+    extreme: { name: 'Extreme', emoji: '⚫', description: 'Expert-level trivia' }
 };
 
 module.exports = {
@@ -34,13 +43,11 @@ module.exports = {
         }
 
         try {
-            // Check if user is an admin
             const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
             
             const inventory = await github.getInventory();
             const activeRooms = await github.getActiveRooms();
 
-            // If not admin, check for room cards
             if (!isAdmin) {
                 if (!inventory[userId] || !inventory[userId].roomcard || inventory[userId].roomcard.length === 0) {
                     return await interaction.reply({
@@ -62,7 +69,6 @@ module.exports = {
                 }
             }
 
-            // Check for active rooms
             const userHasActiveRoom = Object.values(activeRooms).some(room => room.ownerId === userId);
             if (userHasActiveRoom) {
                 return await interaction.reply({
@@ -108,14 +114,66 @@ module.exports = {
         const game = GAMES[gameId];
 
         try {
+            // If Questions game, show difficulty selection
+            if (gameId === 'questions') {
+                const difficultyMenu = new StringSelectMenuBuilder()
+                    .setCustomId('select_difficulty_questions')
+                    .setPlaceholder('Choose difficulty level')
+                    .addOptions(
+                        Object.entries(DIFFICULTIES).map(([id, diff]) => ({
+                            label: diff.name,
+                            description: diff.description,
+                            value: id,
+                            emoji: diff.emoji
+                        }))
+                    );
+
+                const row = new ActionRowBuilder().addComponents(difficultyMenu);
+
+                await interaction.update({
+                    content: `📝 **Questions** selected!\n\nSelect difficulty level:`,
+                    components: [row]
+                });
+            } else {
+                // Other games - show password option
+                const passwordButton = new ButtonBuilder()
+                    .setCustomId(`room_add_password_${gameId}`)
+                    .setLabel('Add Password')
+                    .setEmoji('🔒')
+                    .setStyle(ButtonStyle.Secondary);
+
+                const noPasswordButton = new ButtonBuilder()
+                    .setCustomId(`room_no_password_${gameId}`)
+                    .setLabel('No Password')
+                    .setEmoji('🔓')
+                    .setStyle(ButtonStyle.Primary);
+
+                const row = new ActionRowBuilder().addComponents(passwordButton, noPasswordButton);
+
+                await interaction.update({
+                    content: `${game.emoji} **${game.name}** selected!\n\nWould you like to add a password to your room?`,
+                    components: [row]
+                });
+            }
+
+        } catch (error) {
+            console.error('Error handling game selection:', error);
+        }
+    },
+
+    async handleDifficultySelection(interaction) {
+        const difficulty = interaction.values[0];
+        const diffInfo = DIFFICULTIES[difficulty];
+
+        try {
             const passwordButton = new ButtonBuilder()
-                .setCustomId(`room_add_password_${gameId}`)
+                .setCustomId(`room_add_password_questions_${difficulty}`)
                 .setLabel('Add Password')
                 .setEmoji('🔒')
                 .setStyle(ButtonStyle.Secondary);
 
             const noPasswordButton = new ButtonBuilder()
-                .setCustomId(`room_no_password_${gameId}`)
+                .setCustomId(`room_no_password_questions_${difficulty}`)
                 .setLabel('No Password')
                 .setEmoji('🔓')
                 .setStyle(ButtonStyle.Primary);
@@ -123,12 +181,12 @@ module.exports = {
             const row = new ActionRowBuilder().addComponents(passwordButton, noPasswordButton);
 
             await interaction.update({
-                content: `${game.emoji} **${game.name}** selected!\n\nWould you like to add a password to your room?`,
+                content: `${diffInfo.emoji} **${diffInfo.name}** difficulty selected!\n\nWould you like to add a password to your room?`,
                 components: [row]
             });
 
         } catch (error) {
-            console.error('Error handling game selection:', error);
+            console.error('Error handling difficulty selection:', error);
         }
     },
 
@@ -160,18 +218,26 @@ module.exports = {
         await this.createRoom(interaction, gameId, password);
     },
 
-    async createRoom(interaction, gameId, password) {
+    async createRoom(interaction, gameIdWithDifficulty, password) {
         const userId = interaction.user.id;
+        
+        // Extract gameId and difficulty (for Questions game)
+        let gameId = gameIdWithDifficulty;
+        let difficulty = null;
+        
+        if (gameIdWithDifficulty.startsWith('questions_')) {
+            gameId = 'questions';
+            difficulty = gameIdWithDifficulty.split('_')[1];
+        }
+        
         const game = GAMES[gameId];
 
         try {
-            // Check if user is an admin
             const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
             
             const inventory = await github.getInventory();
             const activeRooms = await github.getActiveRooms();
 
-            // Only consume room card if user is NOT an admin
             if (!isAdmin) {
                 const now = Date.now();
                 const validCards = inventory[userId].roomcard.filter(card => 
@@ -185,7 +251,6 @@ module.exports = {
                     });
                 }
 
-                // Mark the room card as used
                 validCards[0].used = true;
                 await github.saveInventory(inventory);
             }
@@ -199,8 +264,19 @@ module.exports = {
                     { name: '👥 Players', value: `1. ${interaction.user.username}`, inline: false },
                     { name: '🔒 Password', value: password ? '✅ Protected' : '🔓 Open', inline: true },
                     { name: '📊 Status', value: '⏳ Waiting', inline: true }
-                )
-                .setFooter({ text: `Room ID: ${roomId}` })
+                );
+            
+            // Add difficulty field for Questions game
+            if (gameId === 'questions' && difficulty) {
+                const diffInfo = DIFFICULTIES[difficulty];
+                embed.addFields({
+                    name: '⚙️ Difficulty',
+                    value: `${diffInfo.emoji} ${diffInfo.name}`,
+                    inline: true
+                });
+            }
+            
+            embed.setFooter({ text: `Room ID: ${roomId}` })
                 .setTimestamp();
 
             const joinButton = new ButtonBuilder()
@@ -252,6 +328,7 @@ module.exports = {
                 channelId: interaction.channel.id,
                 ownerId: userId,
                 gameId: gameId,
+                difficulty: difficulty, // Store difficulty for Questions game
                 password: password,
                 players: [userId],
                 maxPlayers: 10,
