@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 
-const API_KEY = 'sk_f0ebb47d0fe12f5811542e45b18218b1340ca2727bf07fe1737a51069613d285';
+const API_KEY = 'sk_0adf151e1bc876ae498fdcf0e2da7e9f28538a10894bb1b0ca32af64b145bf8d';
 const API_URL = 'https://gamingsensitivity.vercel.app';
 
 module.exports = {
