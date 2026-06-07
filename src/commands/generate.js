@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 
-const API_KEY = 'sk_0adf151e1bc876ae498fdcf0e2da7e9f28538a10894bb1b0ca32af64b145bf8d';
-const API_URL = 'https://gamingsensitivity.vercel.app';
+const API_KEY = process.env.SENSITIVITY_API_KEY;
+const API_URL = process.env.SENSITIVITY_API_URL || 'https://gamingsensitivity.vercel.app';
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -60,8 +60,15 @@ module.exports = {
                     { name: 'Free', value: 'free' },
                     { name: 'VIP', value: 'vip' }
                 )),
-    
+
     async execute(interaction) {
+        if (!API_KEY) {
+            return await interaction.reply({
+                content: '❌ **Bot misconfiguration:** `SENSITIVITY_API_KEY` is not set. Contact the bot owner.',
+                ephemeral: true,
+            });
+        }
+
         const game = interaction.options.getString('game');
         const device = interaction.options.getString('device');
         const fingerCount = interaction.options.getString('finger_count');
@@ -69,11 +76,9 @@ module.exports = {
         const experience = interaction.options.getString('experience');
         const calculatorType = interaction.options.getString('calculator_type') || 'free';
 
-        // Defer reply immediately
         await interaction.deferReply();
 
         try {
-            // Validate game-specific requirements
             if (game === 'codm' && !fingerCount) {
                 return await interaction.editReply({
                     content: '❌ **Error:** CODM requires finger count selection.\n\nPlease use the `/generate` command again and select a finger count option.'
@@ -86,7 +91,6 @@ module.exports = {
                 });
             }
 
-            // Generate sensitivity based on game
             let result;
 
             if (game === 'codm') {
@@ -94,12 +98,12 @@ module.exports = {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-API-Key': API_KEY
+                        'x-api-key': API_KEY,
                     },
                     body: JSON.stringify({
                         device_name: device,
-                        finger_count: fingerCount
-                    })
+                        finger_count: fingerCount,
+                    }),
                 });
                 result = await response.json();
             } else {
@@ -107,29 +111,27 @@ module.exports = {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-API-Key': API_KEY
+                        'x-api-key': API_KEY,
                     },
                     body: JSON.stringify({
                         device_name: device,
                         play_style: playStyle,
                         experience_level: experience,
-                        calculator_type: calculatorType
-                    })
+                        calculator_type: calculatorType,
+                    }),
                 });
                 result = await response.json();
             }
 
-            // Handle API errors
             if (!result.success) {
                 let errorMsg = `❌ **Error:** ${result.message}\n\n`;
                 if (result.suggestions && result.suggestions.length > 0) {
                     errorMsg += '**💡 Did you mean:**\n' + result.suggestions.map(s => `• ${s}`).join('\n');
                 }
-                errorMsg += '\n\n📱 Visit: https://gamingsensitivity.vercel.app';
+                errorMsg += '\n\n📱 Visit: ' + API_URL;
                 return await interaction.editReply(errorMsg);
             }
 
-            // Send result based on game
             const roleEmoji = calculatorType === 'vip' ? '⭐' : '🆓';
 
             if (game === 'codm') {
@@ -142,20 +144,20 @@ module.exports = {
                         {
                             name: '📸 Camera & Movement',
                             value: `\`\`\`\nCamera FPP: ${mp.cameraFpp}\nSteering:   ${mp.steeringSensitivity}\nVertical:   ${mp.verticalTurningSensitivity}\`\`\``,
-                            inline: false
+                            inline: false,
                         },
                         {
                             name: '🎯 ADS Sensitivity',
                             value: `\`\`\`\nRed Dot:  ${mp.redDot}\nADS:      ${mp.adsSensitivity}\n4x Scope: ${mp.scope4x}\nSniper:   ${mp.sniperScope}\`\`\``,
-                            inline: true
+                            inline: true,
                         },
                         {
                             name: '🔫 Firing Sensitivity',
                             value: `\`\`\`\nFiring Cam:  ${mp.firingCameraFpp}\nFiring Red:  ${mp.firingRedDot}\nFiring 4x:   ${mp.firingScope4x}\`\`\``,
-                            inline: true
+                            inline: true,
                         }
                     )
-                    .setFooter({ text: '🎮 gamingsensitivity.vercel.app' })
+                    .setFooter({ text: '🎮 ' + API_URL.replace('https://', '') })
                     .setTimestamp();
 
                 await interaction.editReply({ embeds: [embed] });
@@ -174,17 +176,17 @@ module.exports = {
                         {
                             name: '🎯 Sensitivity Values',
                             value: `\`\`\`\nGeneral:    ${data.general}\nRed Dot:    ${data.redDot}\n2x Scope:   ${data.scope2x}\n4x Scope:   ${data.scope4x}\nSniper:     ${data.sniperScope}\nFree Look:  ${data.freeLook}\`\`\``,
-                            inline: false
+                            inline: false,
                         }
                     )
-                    .setFooter({ text: '🎮 gamingsensitivity.vercel.app' })
+                    .setFooter({ text: '🎮 ' + API_URL.replace('https://', '') })
                     .setTimestamp();
 
                 if (data.recommendedDPI) {
                     embed.addFields({
                         name: '💡 Recommendations',
                         value: `\`\`\`\nDPI:         ${data.recommendedDPI}\nFire Button: ${data.fireButtonSize}%\nDrag Angle:  ${data.dragAngle}°\`\`\``,
-                        inline: false
+                        inline: false,
                     });
                 }
 
